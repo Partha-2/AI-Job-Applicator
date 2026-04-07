@@ -49,7 +49,7 @@ tabBtns.forEach(btn => {
 // OAuth & User State
 async function checkUserSession() {
   try {
-    const res = await fetch('http://localhost:3000/api/user');
+    const res = await fetch('/api/user');
     const user = await res.json();
     if (user) {
       currentUser = user;
@@ -58,11 +58,11 @@ async function checkUserSession() {
       document.getElementById('userName').innerText = user.displayName;
       
       // Fetch applied jobs from server
-      const appliedRes = await fetch('http://localhost:3000/api/applied-jobs');
+      const appliedRes = await fetch('/api/applied-jobs');
       serverAppliedJobs = await appliedRes.json();
     }
   } catch (e) {
-    console.warn("Backend session check failed. Is the server running?");
+    console.warn("Backend session check failed.");
   }
 }
 
@@ -262,7 +262,7 @@ async function markAsApplied(id) {
     // Attempt save to server if logged in
     if (currentUser) {
       try {
-        await fetch('http://localhost:3000/api/applied-jobs', {
+        await fetch('/api/applied-jobs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jobId: id })
@@ -364,7 +364,7 @@ document.getElementById('fireAllMailsBtn').addEventListener('click', async () =>
    btn.disabled = true; btn.innerText = "Sending...";
 
    try {
-     const res = await fetch('http://localhost:3000/api/send-cold-emails', { method: 'POST', body: fd });
+     const res = await fetch('/api/send-cold-emails', { method: 'POST', body: fd });
      const data = await res.json();
      if (data.success) alert("Bulk outreach complete!"); else alert("Failed: " + data.error);
    } catch(e) { alert("Backend unreachable."); }
@@ -394,7 +394,7 @@ document.getElementById('sendManualBtn').addEventListener('click', async () => {
     btn.disabled = true; btn.innerText = "Sending...";
 
     try {
-        const res = await fetch('http://localhost:3000/api/send-single-email', { method: 'POST', body: fd });
+        const res = await fetch('/api/send-single-email', { method: 'POST', body: fd });
         const data = await res.json();
         if(data.success) alert("Manual email sent!"); else alert("Error: " + data.error);
     } catch(e) { alert("Backend unreachable."); }
@@ -409,7 +409,7 @@ document.getElementById('scrapeBtn').addEventListener('click', async () => {
     btn.disabled = true; btn.innerText = "Scraping...";
 
     try {
-        const res = await fetch('http://localhost:3000/api/scrape-emails', {
+        const res = await fetch('/api/scrape-emails', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
@@ -436,7 +436,7 @@ document.getElementById('scanWalkinsBtn').addEventListener('click', async () => 
     createIcons({ icons });
 
     try {
-      const res = await fetch(`http://localhost:3000/api/walkins?role=${encodeURIComponent(role)}&location=${encodeURIComponent(loc)}`);
+      const res = await fetch(`/api/walkins?role=${encodeURIComponent(role)}&location=${encodeURIComponent(loc)}`);
       const data = await res.json();
       list.innerHTML = '';
       if(data.walkins && data.walkins.length > 0) {
