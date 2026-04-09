@@ -361,13 +361,29 @@ export function createApp() {
   const app = express();
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-  app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }));
+  const isProduction = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
+  const allowedOrigins = [
+    process.env.FRONTEND_URL || 'http://localhost:5173',
+    'https://ai-job-applicator.vercel.app'
+  ];
+
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true
+  }));
   app.use(express.json());
   app.use(session({
     secret: process.env.SESSION_SECRET || 'job-applicator-secret',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false }
+    cookie: {
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      httpOnly: true
+    }
   }));
   app.use(passport.initialize());
   app.use(passport.session());
