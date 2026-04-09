@@ -941,4 +941,17 @@ select {
   .job-details-pane {
     padding: 1rem;
   }
+
+  .toolbar > .primary-btn,
+  .toolbar > .secondary-btn {
+    width: 100%;
+  }
+
+  .ats-textarea {
+    min-height: 180px;
+  }
+
+  .ats-output-text {
+    min-height: 120px;
+  }
 }

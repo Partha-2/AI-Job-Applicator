@@ -24,11 +24,13 @@
     "express-session": "^1.19.0",
     "jsonwebtoken": "^9.0.3",
     "lucide": "^0.300.0",
+    "mammoth": "^1.12.0",
     "multer": "^2.1.1",
     "nodemailer": "^8.0.4",
     "papaparse": "^5.5.3",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
+    "pdfjs-dist": "^5.6.205",
     "xlsx": "^0.18.5"
   }
 }

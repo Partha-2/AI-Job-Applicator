@@ -457,6 +457,51 @@ function createSearchFallback(role, location) {
   return [];
 }
 
+function extractWalkinDate(rawValue) {
+  if (!rawValue) return null;
+  const directDate = new Date(rawValue);
+  if (!Number.isNaN(directDate.getTime())) return directDate;
+
+  const text = rawValue.toString();
+  const dateMatch = text.match(/\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})\b/);
+  if (!dateMatch) return null;
+
+  const parsed = new Date(dateMatch[1]);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatWalkinDateLabel(dateValue) {
+  if (!dateValue) return 'Indexed recently';
+  return dateValue.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function scoreWalkinResult({ title = '', snippet = '', verifyUrl = '', role = '', location = '' }) {
+  const haystack = `${title} ${snippet} ${verifyUrl}`.toLowerCase();
+  const roleTokens = role.toLowerCase().split(/\s+/).filter(Boolean);
+  const locationTokens = location.toLowerCase().split(/\s+/).filter(Boolean);
+
+  let score = 0;
+  if (haystack.includes('walk in')) score += 5;
+  if (haystack.includes('walk-in')) score += 5;
+  if (haystack.includes('interview')) score += 3;
+  if (haystack.includes('hiring drive')) score += 4;
+  if (haystack.includes('career')) score += 1;
+
+  roleTokens.forEach((token) => {
+    if (haystack.includes(token)) score += 2;
+  });
+
+  locationTokens.forEach((token) => {
+    if (haystack.includes(token)) score += 2;
+  });
+
+  return score;
+}
+
 async function searchWalkinQueryViaBing(query, location) {
   const response = await axios.get('https://www.bing.com/search', {
     params: { format: 'rss', q: query },
@@ -470,7 +515,7 @@ async function searchWalkinQueryViaBing(query, location) {
   const results = [];
 
   $('item').each((index, element) => {
-    if (index >= 8) return false;
+    if (index >= 12) return false;
 
     const verifyUrl = $(element).find('link').first().text().trim();
     if (!verifyUrl || !isAllowedWalkinHost(verifyUrl)) {
@@ -479,6 +524,7 @@ async function searchWalkinQueryViaBing(query, location) {
 
     const title = $(element).find('title').first().text().trim();
     const snippet = $(element).find('description').first().text().trim();
+    const publishedAt = extractWalkinDate($(element).find('pubDate').first().text().trim() || snippet || title);
     const source = (() => {
       try {
         return new URL(verifyUrl).hostname.replace(/^www\./, '');
@@ -494,15 +540,13 @@ async function searchWalkinQueryViaBing(query, location) {
       title: title || `${query} result`,
       company: companyMatch?.[1]?.trim() || source,
       location,
-      dateLabel: new Date().toLocaleDateString('en-IN', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-      }),
+      dateLabel: formatWalkinDateLabel(publishedAt),
       description: snippet || 'Live listing discovered from indexed search results.',
       verifyUrl,
       source,
-      snippet
+      snippet,
+      publishedAt: publishedAt?.toISOString() || '',
+      score: scoreWalkinResult({ title, snippet, verifyUrl, role: query, location })
     });
   });
 
@@ -535,7 +579,7 @@ async function searchWalkinQuery(query, location) {
   const results = [];
 
   $('div.result').each((index, element) => {
-    if (index >= 6) return false;
+    if (index >= 10) return false;
 
     const anchor = $(element).find('a.result__a').first();
     const rawHref = anchor.attr('href');
@@ -547,6 +591,7 @@ async function searchWalkinQuery(query, location) {
 
     const title = anchor.text().trim();
     const snippet = $(element).find('.result__snippet').text().trim();
+    const publishedAt = extractWalkinDate(snippet || title);
     const source = (() => {
       try {
         return new URL(verifyUrl).hostname.replace(/^www\./, '');
@@ -562,15 +607,13 @@ async function searchWalkinQuery(query, location) {
       title: title || `${query} result`,
       company: companyMatch?.[1]?.trim() || source,
       location,
-      dateLabel: new Date().toLocaleDateString('en-IN', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-      }),
+      dateLabel: formatWalkinDateLabel(publishedAt),
       description: snippet || 'Live listing discovered from a search result.',
       verifyUrl,
       source,
-      snippet
+      snippet,
+      publishedAt: publishedAt?.toISOString() || '',
+      score: scoreWalkinResult({ title, snippet, verifyUrl, role: query, location })
     });
   });
 
@@ -578,12 +621,17 @@ async function searchWalkinQuery(query, location) {
 }
 
 async function fetchLiveWalkins(role, location) {
+  const now = new Date();
+  const monthLabel = now.toLocaleDateString('en-IN', { month: 'long' });
+  const yearLabel = `${now.getFullYear()}`;
   const queries = [
     `"walk in interview" ${role} ${location} site:linkedin.com/jobs`,
     `"walk in" ${role} ${location} site:linkedin.com`,
     `"walk in" ${role} ${location} site:foundit.in`,
     `"walk in interview" ${role} ${location} site:naukri.com`,
-    `${role} hiring drive ${location} site:linkedin.com`
+    `${role} hiring drive ${location} site:linkedin.com`,
+    `"walk in interview" ${role} ${location} ${monthLabel} ${yearLabel} site:naukri.com`,
+    `"walk in" ${role} ${location} ${monthLabel} ${yearLabel} site:foundit.in`
   ];
 
   const settled = await Promise.allSettled(queries.map((query) => searchWalkinQuery(query, location)));
@@ -593,13 +641,22 @@ async function fetchLiveWalkins(role, location) {
     if (result.status !== 'fulfilled') return;
 
     result.value.forEach((item) => {
+      if (item.score < 4) return;
       if (!deduped.has(item.verifyUrl)) {
         deduped.set(item.verifyUrl, item);
       }
     });
   });
 
-  const liveResults = Array.from(deduped.values()).slice(0, 12);
+  const liveResults = Array.from(deduped.values())
+    .sort((left, right) => {
+      const scoreDelta = (right.score || 0) - (left.score || 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const rightDate = right.publishedAt ? new Date(right.publishedAt).getTime() : 0;
+      const leftDate = left.publishedAt ? new Date(left.publishedAt).getTime() : 0;
+      return rightDate - leftDate;
+    })
+    .slice(0, 12);
   return liveResults.length > 0 ? liveResults : createSearchFallback(role, location);
 }
 
@@ -813,6 +870,7 @@ export function createApp() {
   app.get('/api/walkins', async (req, res) => {
     const location = (req.query.location || 'Bangalore').toString();
     const role = (req.query.role || 'Java Backend').toString();
+    res.set('Cache-Control', 'no-store');
 
     try {
       const walkins = await fetchLiveWalkins(role, location);

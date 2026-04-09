@@ -1,8 +1,12 @@
 import './style.css';
 import { createIcons, icons } from 'lucide';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
+import mammoth from 'mammoth';
 import Papa from 'papaparse';
+import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import * as xlsx from 'xlsx';
+
+GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
 createIcons({ icons });
 
@@ -34,6 +38,7 @@ let outreachVariants = [];
 let savedManualAttachments = [];
 let savedResumeFiles = [];
 let atsAnalysis = null;
+let atsResumeFileName = '';
 
 const clientId = ensureClientId();
 
@@ -86,6 +91,8 @@ const fireAllMailsBtn = document.getElementById('fireAllMailsBtn');
 const sendManualBtn = document.getElementById('sendManualBtn');
 const headerLoginBtn = document.getElementById('loginBtn');
 const atsResumeInput = document.getElementById('atsResumeInput');
+const atsResumeFileInput = document.getElementById('atsResumeFileInput');
+const atsResumeFileInfo = document.getElementById('atsResumeFileInfo');
 const atsJobInput = document.getElementById('atsJobInput');
 const generateAtsBtn = document.getElementById('generateAtsBtn');
 const clearAtsBtn = document.getElementById('clearAtsBtn');
@@ -197,6 +204,7 @@ function bindEvents() {
   generateAtsBtn?.addEventListener('click', generateAtsTailor);
   clearAtsBtn?.addEventListener('click', clearAtsTailor);
   downloadAtsDocxBtn?.addEventListener('click', downloadAtsDocx);
+  atsResumeFileInput?.addEventListener('change', handleAtsResumeUpload);
   headerLoginBtn.addEventListener('click', () => {
     window.location.href = '/auth/google';
   });
@@ -345,8 +353,13 @@ function restoreAtsDraft() {
     atsResumeInput.value = draft.resume || '';
     atsJobInput.value = draft.jobDescription || '';
     atsAnalysis = draft.analysis || null;
+    atsResumeFileName = draft.resumeFileName || '';
+    atsResumeFileInfo.textContent = atsResumeFileName
+      ? `Last uploaded resume: ${atsResumeFileName}`
+      : 'Upload `.txt`, `.docx`, or `.pdf`, or paste resume text manually below.';
   } catch {
     atsAnalysis = null;
+    atsResumeFileName = '';
   }
 }
 
@@ -354,8 +367,80 @@ function persistAtsDraft() {
   localStorage.setItem(ATS_TAILOR_KEY, JSON.stringify({
     resume: atsResumeInput.value,
     jobDescription: atsJobInput.value,
-    analysis: atsAnalysis
+    analysis: atsAnalysis,
+    resumeFileName: atsResumeFileName
   }));
+}
+
+function persistAtsResumeFileName(fileName = '') {
+  atsResumeFileName = fileName;
+  localStorage.setItem(ATS_TAILOR_KEY, JSON.stringify({
+    resume: atsResumeInput.value,
+    jobDescription: atsJobInput.value,
+    analysis: atsAnalysis,
+    resumeFileName: fileName
+  }));
+}
+
+async function extractPdfText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const pages = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pages.push(content.items.map((item) => ('str' in item ? item.str : '')).join(' '));
+  }
+
+  return pages.join('\n').trim();
+}
+
+async function extractDocxText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
+}
+
+async function extractTextFromResumeFile(file) {
+  const lowerName = file.name.toLowerCase();
+
+  if (lowerName.endsWith('.txt')) {
+    return file.text();
+  }
+
+  if (lowerName.endsWith('.docx')) {
+    return extractDocxText(file);
+  }
+
+  if (lowerName.endsWith('.pdf')) {
+    return extractPdfText(file);
+  }
+
+  throw new Error('Unsupported file type. Upload `.txt`, `.docx`, or `.pdf`.');
+}
+
+async function handleAtsResumeUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  atsResumeFileInfo.textContent = `Reading ${file.name}...`;
+  setInlineStatus(atsStatus, `Reading resume from ${file.name}...`, 'info');
+
+  try {
+    const extractedText = (await extractTextFromResumeFile(file)).trim();
+    if (!extractedText) {
+      throw new Error('Could not extract readable text from that file.');
+    }
+
+    atsResumeInput.value = extractedText;
+    persistAtsResumeFileName(file.name);
+    atsResumeFileInfo.textContent = `Loaded resume: ${file.name}`;
+    setInlineStatus(atsStatus, `Resume uploaded from ${file.name}. Review the text, then generate the ATS tailor.`, 'success');
+  } catch (error) {
+    atsResumeFileInfo.textContent = `Failed to read ${file.name}`;
+    setInlineStatus(atsStatus, error.message || 'Resume upload failed.', 'error');
+  }
 }
 
 const ATS_KEYWORDS = [
@@ -496,7 +581,10 @@ function generateAtsTailor() {
 function clearAtsTailor() {
   atsResumeInput.value = '';
   atsJobInput.value = '';
+  atsResumeFileInput.value = '';
   atsAnalysis = null;
+  atsResumeFileName = '';
+  atsResumeFileInfo.textContent = 'Upload `.txt`, `.docx`, or `.pdf`, or paste resume text manually below.';
   localStorage.removeItem(ATS_TAILOR_KEY);
   renderAtsAnalysis();
   setInlineStatus(atsStatus, 'ATS tailor inputs and results cleared.', 'info');
@@ -1543,7 +1631,9 @@ async function scanWalkins() {
   createIcons({ icons });
 
   try {
-    const response = await apiFetch(`/api/walkins?role=${encodeURIComponent(role)}&location=${encodeURIComponent(location)}`);
+    const response = await apiFetch(`/api/walkins?role=${encodeURIComponent(role)}&location=${encodeURIComponent(location)}&ts=${Date.now()}`, {
+      cache: 'no-store'
+    });
     const data = await safeJson(response);
 
     if (!response.ok) throw new Error(data.error || 'Walk-in scan failed.');
@@ -1572,6 +1662,7 @@ async function scanWalkins() {
           ${renderBadge('calendar-days', item.dateLabel)}
         </div>
         <p class="walkin-copy">${item.description || item.snippet || 'Live listing link found from current search results.'}</p>
+        <div class="saved-draft">Scanned ${formatDateTime(data.generatedAt)}${item.publishedAt ? ` • listed ${formatDateTime(item.publishedAt)}` : ''}</div>
         <a href="${item.verifyUrl}" target="_blank" rel="noopener noreferrer" class="primary-btn w-full"><i data-lucide="external-link"></i> Open Real Link</a>
       `;
       walkInList.appendChild(card);
