@@ -53,20 +53,6 @@
 
         <div id="appStatus" class="status-banner hidden"></div>
 
-        <section id="authPanel" class="glass-card auth-panel">
-          <div>
-            <p class="eyebrow">Easy Login</p>
-            <h2>Start with name and email.</h2>
-            <p class="muted-text">Use quick login for tracking jobs instantly. Connect Google only when you want to send email from Gmail.</p>
-          </div>
-          <div class="auth-grid">
-            <input type="text" id="quickLoginName" class="input-field" placeholder="Your name" />
-            <input type="email" id="quickLoginEmail" class="input-field" placeholder="Your email" />
-            <button class="primary-btn" id="quickLoginBtn"><i data-lucide="arrow-right"></i> Continue</button>
-            <a href="/auth/google" class="secondary-btn" id="authGoogleBtn"><i data-lucide="mail-check"></i> Connect Google Sender</a>
-          </div>
-        </section>
-
         <div class="tabs" id="mainTabs">
           <button class="tab-btn active" data-target="jobsTabContent">Jobs Dashboard</button>
           <button class="tab-btn" data-target="appliedSection">Applied Tracker</button>
@@ -193,7 +179,7 @@
                       <label>Sender Account</label>
                       <div id="bulkSenderStatus" class="saved-draft">Login with Google to send from your account.</div>
                     </div>
-                    <a href="/auth/google" id="bulkLoginHint" class="secondary-btn">Connect Google Sender</a>
+                    <a href="/auth/google-gmail" id="bulkLoginHint" class="secondary-btn">Connect Google Sender</a>
                   </div>
                   <div class="form-group">
                     <label>Resume (PDF)</label>

@@ -39,10 +39,6 @@ const paginationControls = document.getElementById('paginationControls');
 const jobDetailsEmptyState = document.getElementById('detailsEmptyState');
 const jobDetailsContent = document.getElementById('detailsContent');
 const appStatus = document.getElementById('appStatus');
-const authPanel = document.getElementById('authPanel');
-const quickLoginName = document.getElementById('quickLoginName');
-const quickLoginEmail = document.getElementById('quickLoginEmail');
-const quickLoginBtn = document.getElementById('quickLoginBtn');
 
 const heroPendingCount = document.getElementById('heroPendingCount');
 const heroAppliedCount = document.getElementById('heroAppliedCount');
@@ -169,19 +165,9 @@ function bindEvents() {
   document.getElementById('sendManualBtn').addEventListener('click', sendManualEmail);
   document.getElementById('scrapeBtn').addEventListener('click', scrapeEmailsFromUrl);
   document.getElementById('scanWalkinsBtn').addEventListener('click', scanWalkins);
-  quickLoginBtn.addEventListener('click', submitQuickLogin);
 
   [manualToEmailInput, manualSubjectInput, manualBodyInput, scrapeUrlInput].forEach((element) => {
     element.addEventListener('input', persistOutreachDraft);
-  });
-
-  [quickLoginName, quickLoginEmail].forEach((element) => {
-    element.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        submitQuickLogin();
-      }
-    });
   });
 
   resumeUpload.addEventListener('change', async () => {
@@ -321,58 +307,22 @@ function updateSenderUi() {
   const permissionHint = currentUser?.canSendMail
     ? 'Mail access is ready.'
     : currentUser?.email
-      ? 'Reconnect with Google if mail permission is missing.'
+      ? 'Connect Gmail sender only if you want to send mail.'
       : 'Mail sending is disabled until you log in.';
 
   bulkSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
   manualSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
   bulkLoginHint.classList.toggle('hidden', Boolean(currentUser?.canSendMail));
-  bulkLoginHint.textContent = currentUser?.email ? 'Reconnect Google Sender' : 'Connect Google Sender';
+  bulkLoginHint.textContent = currentUser?.email ? 'Connect Gmail Sender' : 'Login with Google';
+  bulkLoginHint.href = currentUser?.email ? '/auth/google-gmail' : '/auth/google';
   fireAllMailsBtn.disabled = !currentUser?.canSendMail;
   sendManualBtn.disabled = !currentUser?.canSendMail;
 
-  authPanel.classList.toggle('hidden', Boolean(currentUser?.email));
   document.getElementById('userProfile').classList.toggle('hidden', !currentUser?.email);
-  headerLoginBtn.classList.toggle('hidden', Boolean(currentUser?.canSendMail));
-  headerLoginBtn.innerHTML = currentUser?.email
-    ? '<i data-lucide="mail-check"></i> Connect Gmail Sender'
-    : '<i data-lucide="log-in"></i> Login with Google';
+  headerLoginBtn.classList.toggle('hidden', Boolean(currentUser?.email));
+  headerLoginBtn.innerHTML = '<i data-lucide="log-in"></i> Login with Google';
+  headerLoginBtn.href = '/auth/google';
   createIcons({ icons });
-}
-
-async function submitQuickLogin() {
-  const name = quickLoginName.value.trim();
-  const email = quickLoginEmail.value.trim().toLowerCase();
-
-  if (!name || !email) {
-    showBanner('Enter your name and email to continue.', 'warning');
-    return;
-  }
-
-  quickLoginBtn.disabled = true;
-  quickLoginBtn.textContent = 'Signing in...';
-
-  try {
-    const response = await apiFetch('/auth/local-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email })
-    });
-    const data = await safeJson(response);
-    if (!response.ok) throw new Error(data.error || 'Quick login failed.');
-
-    currentUser = data.user;
-    document.getElementById('userName').innerText = currentUser.displayName;
-    updateSenderUi();
-    await loadAppliedRecords();
-    showBanner(`Logged in as ${currentUser.displayName}.`, 'success');
-  } catch (error) {
-    showBanner(error.message || 'Quick login failed.', 'error');
-  } finally {
-    quickLoginBtn.disabled = false;
-    quickLoginBtn.innerHTML = '<i data-lucide="arrow-right"></i> Continue';
-    createIcons({ icons });
-  }
 }
 
 function openDraftDatabase() {

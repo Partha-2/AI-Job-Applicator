@@ -86,7 +86,7 @@ function buildAppliedRecord(payload) {
 }
 
 function getSessionUser(req) {
-  return req.user || req.session?.localUser || null;
+  return req.user || null;
 }
 
 function buildPublicUser(user) {
@@ -377,6 +377,10 @@ export function createApp() {
     })));
 
     app.get('/auth/google', passport.authenticate('google', {
+      scope: ['profile', 'email']
+    }));
+
+    app.get('/auth/google-gmail', passport.authenticate('google', {
       scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.send'],
       accessType: 'offline',
       prompt: 'consent',
@@ -386,15 +390,13 @@ export function createApp() {
     app.get('/auth/google/callback',
       passport.authenticate('google', { failureRedirect: `${frontendUrl}/login?error=true` }),
       (req, res) => {
-        if (req.session) {
-          req.session.localUser = null;
-        }
         res.redirect(frontendUrl);
       }
     );
   } else {
     console.warn('Google OAuth keys missing or default. Authentication features disabled.');
     app.get('/auth/google', (req, res) => res.status(501).json({ error: 'OAuth not configured. Please add keys to .env' }));
+    app.get('/auth/google-gmail', (req, res) => res.status(501).json({ error: 'OAuth not configured. Please add keys to .env' }));
   }
 
   app.get('/api/user', (req, res) => {
@@ -408,34 +410,7 @@ export function createApp() {
     });
   });
 
-  app.post('/auth/local-login', (req, res) => {
-    const name = (req.body?.name || '').toString().trim();
-    const email = (req.body?.email || '').toString().trim().toLowerCase();
-
-    if (!name || !email) {
-      return res.status(400).json({ error: 'Name and email are required.' });
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Enter a valid email address.' });
-    }
-
-    req.session.localUser = {
-      id: `local:${email}`,
-      displayName: name,
-      email,
-      provider: 'local'
-    };
-
-    res.json({ success: true, user: buildPublicUser(req.session.localUser) });
-  });
-
   app.get('/auth/logout', (req, res, next) => {
-    if (req.session) {
-      req.session.localUser = null;
-    }
-
     if (req.user && typeof req.logout === 'function') {
       req.logout((err) => {
         if (err) return next(err);
@@ -444,9 +419,7 @@ export function createApp() {
       return;
     }
 
-    req.session?.destroy?.(() => {
-      res.redirect(frontendUrl);
-    });
+    res.redirect(frontendUrl);
   });
 
   app.get('/api/applied-jobs', (req, res) => {
