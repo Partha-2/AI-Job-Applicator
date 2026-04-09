@@ -173,7 +173,7 @@
 
                 <div id="outreachStatus" class="inline-status hidden"></div>
 
-                <div id="automationConfig" class="automation-form hidden">
+                <div id="automationConfig" class="automation-form">
                   <div class="sender-panel">
                     <div>
                       <label>Sender Account</label>
@@ -190,7 +190,7 @@
                 </div>
 
                 <div id="outreachEmptyState" class="empty-state">
-                  Load an HR export to preview contacts and mailing templates.
+                  Load an HR export to preview contacts and mailing templates. You can connect your sender account and save your resume anytime.
                 </div>
                 <div id="outreachList" class="outreach-list hidden"></div>
               </div>
@@ -226,7 +226,12 @@
                 <div class="manual-form">
                   <div class="form-group">
                     <label>Sender Account</label>
-                    <div id="manualSenderStatus" class="saved-draft">Login with Google to send mail from your account.</div>
+                    <div class="sender-panel">
+                      <div class="w-full">
+                        <div id="manualSenderStatus" class="saved-draft">Login with Google to send mail from your account.</div>
+                      </div>
+                      <a href="/auth/google-gmail" id="manualLoginHint" class="secondary-btn">Connect Gmail Sender</a>
+                    </div>
                   </div>
                   <div class="form-group">
                     <label>Receiver Email</label>

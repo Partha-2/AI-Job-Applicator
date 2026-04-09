@@ -63,6 +63,7 @@ const scrapeStatus = document.getElementById('scrapeStatus');
 const bulkSenderStatus = document.getElementById('bulkSenderStatus');
 const bulkLoginHint = document.getElementById('bulkLoginHint');
 const manualSenderStatus = document.getElementById('manualSenderStatus');
+const manualLoginHint = document.getElementById('manualLoginHint');
 const resumeUpload = document.getElementById('resumeUpload');
 const manualToEmailInput = document.getElementById('manualToEmail');
 const manualSubjectInput = document.getElementById('manualSubject');
@@ -313,13 +314,19 @@ function updateSenderUi() {
       ? 'Connect Gmail sender only if you want to send mail.'
       : 'Mail sending is disabled until you log in.';
 
+  const senderActionHref = currentUser?.email ? '/auth/google-gmail' : '/auth/google';
+  const senderActionLabel = currentUser?.canSendMail
+    ? 'Reconnect Gmail Sender'
+    : currentUser?.email
+      ? 'Connect Gmail Sender'
+      : 'Login with Google';
+
   bulkSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
   manualSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
-  bulkLoginHint.classList.toggle('hidden', Boolean(currentUser?.canSendMail));
-  bulkLoginHint.textContent = currentUser?.email ? 'Connect Gmail Sender' : 'Login with Google';
-  bulkLoginHint.href = currentUser?.email ? '/auth/google-gmail' : '/auth/google';
-  fireAllMailsBtn.disabled = !currentUser?.canSendMail;
-  sendManualBtn.disabled = !currentUser?.canSendMail;
+  bulkLoginHint.textContent = senderActionLabel;
+  bulkLoginHint.href = senderActionHref;
+  manualLoginHint.textContent = senderActionLabel;
+  manualLoginHint.href = senderActionHref;
 
   document.getElementById('userProfile').classList.toggle('hidden', !currentUser?.email);
   headerLoginBtn.classList.toggle('hidden', Boolean(currentUser?.email));
@@ -993,6 +1000,11 @@ function renderOutreachContacts() {
 
 async function sendBulkOutreach() {
   const resume = savedResumeFiles[0] || resumeUpload.files[0];
+
+  if (!outreachContacts.length) {
+    setInlineStatus(outreachStatus, 'Load recruiter HTML first so there are contacts to send to.', 'warning');
+    return;
+  }
 
   if (!currentUser?.canSendMail) {
     setInlineStatus(outreachStatus, 'Login with Google and approve Gmail access before sending outreach.', 'warning');
