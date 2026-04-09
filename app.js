@@ -128,12 +128,15 @@ function getSessionUser(req) {
 function buildPublicUser(user) {
   if (!user) return null;
 
+  const gmailClientId = process.env.GOOGLE_GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  const gmailClientSecret = process.env.GOOGLE_GMAIL_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+
   return {
     id: user.id,
     displayName: user.displayName || 'User',
     email: user.email || user.emails?.[0]?.value || '',
     photo: user.photo || user.photos?.[0]?.value || '',
-    canSendMail: Boolean(user.refreshToken && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+    canSendMail: Boolean(user.refreshToken && gmailClientId && gmailClientSecret)
   };
 }
 
@@ -412,6 +415,11 @@ export function createApp() {
   }));
   app.use(express.json());
   app.use(cookieParser());
+  app.use((req, _res, next) => {
+    req.user = getUserFromToken(req);
+    next();
+  });
+  app.use(passport.initialize());
 
   // Passport only used to facilitate the OAuth redirect/callback — user is then stored in a JWT cookie
   passport.serializeUser((user, done) => done(null, user));
@@ -432,7 +440,7 @@ export function createApp() {
       clientSecret: loginClientSecret,
       callbackURL: loginCallbackUrl,
       passReqToCallback: true
-    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(getUserFromToken(req), profile, accessToken, refreshToken))));
+    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(req.user, profile, accessToken, refreshToken))));
 
     app.get('/auth/google', passport.authenticate('google-login', { scope: ['profile', 'email'], session: false }));
     app.get('/auth/google/callback',
@@ -453,7 +461,7 @@ export function createApp() {
       clientSecret: gmailClientSecret,
       callbackURL: gmailCallbackUrl,
       passReqToCallback: true
-    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(getUserFromToken(req), profile, accessToken, refreshToken))));
+    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(req.user, profile, accessToken, refreshToken))));
 
     app.get('/auth/google-gmail', passport.authenticate('google-gmail', {
       scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.send'],
@@ -472,8 +480,7 @@ export function createApp() {
   }
 
   app.get('/api/user', (req, res) => {
-    const user = getUserFromToken(req);
-    res.json(buildPublicUser(user));
+    res.json(buildPublicUser(req.user));
   });
 
   app.get('/api/health', (req, res) => {
