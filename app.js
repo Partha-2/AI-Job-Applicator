@@ -108,7 +108,10 @@ function createAuthenticatedGmailTransport(req) {
     throw error;
   }
 
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+  const gmailClientId = process.env.GOOGLE_GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  const gmailClientSecret = process.env.GOOGLE_GMAIL_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+
+  if (!gmailClientId || !gmailClientSecret) {
     const error = new Error('Google mail sending is not configured on the server.');
     error.statusCode = 500;
     throw error;
@@ -134,11 +137,23 @@ function createAuthenticatedGmailTransport(req) {
       auth: {
         type: 'OAuth2',
         user: senderEmail,
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        clientId: gmailClientId,
+        clientSecret: gmailClientSecret,
         refreshToken: req.user.refreshToken
       }
     })
+  };
+}
+
+function buildOAuthUser(existingUser, profile, accessToken, refreshToken) {
+  return {
+    id: existingUser?.id || profile.id,
+    displayName: profile.displayName || existingUser?.displayName || 'User',
+    email: profile.emails?.[0]?.value || existingUser?.email || '',
+    photo: profile.photos?.[0]?.value || existingUser?.photo || '',
+    accessToken: accessToken || existingUser?.accessToken || '',
+    refreshToken: refreshToken || existingUser?.refreshToken || '',
+    provider: 'google'
   };
 }
 
@@ -362,41 +377,59 @@ export function createApp() {
   passport.serializeUser((user, done) => done(null, user));
   passport.deserializeUser((user, done) => done(null, user));
 
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_ID !== 'your_google_client_id_here') {
-    passport.use(new GoogleStrategy({
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: process.env.GOOGLE_CALLBACK_URL || 'https://ai-job-applicator.vercel.app/auth/google/callback'
-    }, (accessToken, refreshToken, profile, done) => done(null, {
-      id: profile.id,
-      displayName: profile.displayName,
-      email: profile.emails?.[0]?.value || '',
-      photo: profile.photos?.[0]?.value || '',
-      accessToken,
-      refreshToken
-    })));
+  const loginClientId = process.env.GOOGLE_LOGIN_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  const loginClientSecret = process.env.GOOGLE_LOGIN_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+  const loginCallbackUrl = process.env.GOOGLE_LOGIN_CALLBACK_URL || process.env.GOOGLE_CALLBACK_URL || 'https://ai-job-applicator.vercel.app/auth/google/callback';
+  const gmailClientId = process.env.GOOGLE_GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+  const gmailClientSecret = process.env.GOOGLE_GMAIL_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+  const gmailCallbackUrl = process.env.GOOGLE_GMAIL_CALLBACK_URL || 'https://ai-job-applicator.vercel.app/auth/google-gmail/callback';
 
-    app.get('/auth/google', passport.authenticate('google', {
+  if (loginClientId && loginClientId !== 'your_google_client_id_here' && loginClientSecret) {
+    passport.use('google-login', new GoogleStrategy({
+      clientID: loginClientId,
+      clientSecret: loginClientSecret,
+      callbackURL: loginCallbackUrl,
+      passReqToCallback: true
+    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(getSessionUser(req), profile, accessToken, refreshToken))));
+
+    app.get('/auth/google', passport.authenticate('google-login', {
       scope: ['profile', 'email']
     }));
+    app.get('/auth/google/callback',
+      passport.authenticate('google-login', { failureRedirect: `${frontendUrl}?loginError=oauth` }),
+      (req, res) => {
+        res.redirect(frontendUrl);
+      }
+    );
+  } else {
+    console.warn('Google login OAuth keys missing or default. Google sign-in disabled.');
+    app.get('/auth/google', (req, res) => res.status(501).json({ error: 'OAuth not configured. Please add keys to .env' }));
+  }
 
-    app.get('/auth/google-gmail', passport.authenticate('google', {
+  if (gmailClientId && gmailClientId !== 'your_google_client_id_here' && gmailClientSecret) {
+    passport.use('google-gmail', new GoogleStrategy({
+      clientID: gmailClientId,
+      clientSecret: gmailClientSecret,
+      callbackURL: gmailCallbackUrl,
+      passReqToCallback: true
+    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(getSessionUser(req), profile, accessToken, refreshToken))));
+
+    app.get('/auth/google-gmail', passport.authenticate('google-gmail', {
       scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.send'],
       accessType: 'offline',
       prompt: 'consent',
       includeGrantedScopes: true
     }));
 
-    app.get('/auth/google/callback',
-      passport.authenticate('google', { failureRedirect: `${frontendUrl}/login?error=true` }),
+    app.get('/auth/google-gmail/callback',
+      passport.authenticate('google-gmail', { failureRedirect: `${frontendUrl}?gmailError=oauth` }),
       (req, res) => {
         res.redirect(frontendUrl);
       }
     );
   } else {
-    console.warn('Google OAuth keys missing or default. Authentication features disabled.');
-    app.get('/auth/google', (req, res) => res.status(501).json({ error: 'OAuth not configured. Please add keys to .env' }));
-    app.get('/auth/google-gmail', (req, res) => res.status(501).json({ error: 'OAuth not configured. Please add keys to .env' }));
+    console.warn('Google Gmail OAuth keys missing or default. Gmail sender connect disabled.');
+    app.get('/auth/google-gmail', (req, res) => res.status(501).json({ error: 'Gmail OAuth not configured. Please add Gmail OAuth keys to .env' }));
   }
 
   app.get('/api/user', (req, res) => {
