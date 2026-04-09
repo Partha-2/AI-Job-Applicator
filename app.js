@@ -45,8 +45,9 @@ function writeAppliedJobsStore(store) {
 }
 
 function getOwnerKey(req) {
-  if (req.user?.emails?.[0]?.value) {
-    return `user:${req.user.emails[0].value.toLowerCase()}`;
+  const userEmail = req.user?.email || req.user?.emails?.[0]?.value;
+  if (userEmail) {
+    return `user:${userEmail.toLowerCase()}`;
   }
 
   const clientId = req.get('x-client-id') || req.query.clientId || req.body?.clientId;
@@ -83,16 +84,77 @@ function buildAppliedRecord(payload) {
   };
 }
 
+function buildPublicUser(user) {
+  if (!user) return null;
+
+  return {
+    id: user.id,
+    displayName: user.displayName || 'User',
+    email: user.email || user.emails?.[0]?.value || '',
+    photo: user.photo || user.photos?.[0]?.value || '',
+    canSendMail: Boolean(user.refreshToken && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+  };
+}
+
+function createAuthenticatedGmailTransport(req) {
+  if (!req.user) {
+    const error = new Error('Sign in with Google first to send email.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    const error = new Error('Google mail sending is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  if (!req.user.refreshToken) {
+    const error = new Error('Your Google session does not include Gmail send access. Log out and sign in again, then approve Gmail access.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const senderEmail = req.user.email || req.user.emails?.[0]?.value;
+  if (!senderEmail) {
+    const error = new Error('Could not determine the logged-in sender email.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return {
+    senderEmail,
+    transporter: nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        type: 'OAuth2',
+        user: senderEmail,
+        clientId: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        refreshToken: req.user.refreshToken
+      }
+    })
+  };
+}
+
 function normalizeMailerError(error) {
   const rawMessage = error?.message || 'Email sending failed.';
   const normalized = rawMessage.toLowerCase();
 
+  if (normalized.includes('gmail send access')) {
+    return rawMessage;
+  }
+
+  if (normalized.includes('sign in with google first')) {
+    return rawMessage;
+  }
+
   if (error?.code === 'EAUTH' || normalized.includes('535-5.7.8') || normalized.includes('badcredentials')) {
-    return 'Gmail rejected the login. Use your full Gmail address and a 16-character Google App Password, not your normal Gmail password. Also make sure 2-Step Verification is enabled on that Google account.';
+    return 'Google rejected mail access for this session. Log out, sign in again with Google, and approve Gmail send access.';
   }
 
   if (normalized.includes('invalid login')) {
-    return 'Login failed. Double-check the sender email and App Password, and confirm the account allows Gmail SMTP access.';
+    return 'Google mail login failed. Log out, sign in again with Google, and approve Gmail send access for this account.';
   }
 
   if (normalized.includes('daily user sending quota exceeded')) {
@@ -100,7 +162,7 @@ function normalizeMailerError(error) {
   }
 
   if (normalized.includes('message rejected') || normalized.includes('unauthenticated')) {
-    return 'Gmail rejected the message. Re-check the sender account, App Password, and attachment size.';
+    return 'Google rejected the message. Re-check the logged-in sender account and attachment size.';
   }
 
   return rawMessage;
@@ -299,11 +361,23 @@ export function createApp() {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       callbackURL: process.env.GOOGLE_CALLBACK_URL || 'https://ai-job-applicator.vercel.app/auth/google/callback'
-    }, (accessToken, refreshToken, profile, done) => done(null, profile)));
+    }, (accessToken, refreshToken, profile, done) => done(null, {
+      id: profile.id,
+      displayName: profile.displayName,
+      email: profile.emails?.[0]?.value || '',
+      photo: profile.photos?.[0]?.value || '',
+      accessToken,
+      refreshToken
+    })));
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-    app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+    app.get('/auth/google', passport.authenticate('google', {
+      scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.send'],
+      accessType: 'offline',
+      prompt: 'consent',
+      includeGrantedScopes: true
+    }));
 
     app.get('/auth/google/callback',
       passport.authenticate('google', { failureRedirect: `${frontendUrl}/login?error=true` }),
@@ -324,7 +398,7 @@ export function createApp() {
   }
 
   app.get('/api/user', (req, res) => {
-    res.json(req.user || null);
+    res.json(buildPublicUser(req.user));
   });
 
   app.get('/api/health', (req, res) => {
@@ -425,23 +499,19 @@ export function createApp() {
 
   app.post('/api/send-cold-emails', upload.single('resume'), async (req, res) => {
     try {
-      const { email, password, contacts } = req.body;
+      const { contacts } = req.body;
       const parsedContacts = JSON.parse(contacts || '[]');
+      const { senderEmail, transporter } = createAuthenticatedGmailTransport(req);
 
-      if (!email || !password || parsedContacts.length === 0) {
+      if (parsedContacts.length === 0) {
         return res.status(400).json({ success: false, error: 'Missing required fields.' });
       }
-
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: email, pass: password }
-      });
 
       const results = [];
       for (const contact of parsedContacts) {
         try {
           await transporter.sendMail({
-            from: email,
+            from: senderEmail,
             to: contact.to,
             subject: contact.subject,
             text: contact.body,
@@ -454,32 +524,28 @@ export function createApp() {
       }
 
       if (req.file) fs.unlinkSync(req.file.path);
-      res.json({ success: true, results });
+      res.json({ success: true, results, senderEmail });
     } catch (error) {
-      res.status(500).json({ success: false, error: normalizeMailerError(error) });
+      res.status(error.statusCode || 500).json({ success: false, error: normalizeMailerError(error) });
     }
   });
 
   app.post('/api/send-single-email', upload.array('attachments'), async (req, res) => {
     try {
-      const { fromEmail, fromPass, to, subject, body } = req.body;
+      const { to, subject, body } = req.body;
+      const { senderEmail, transporter } = createAuthenticatedGmailTransport(req);
 
-      if (!fromEmail || !fromPass || !to || !subject || !body) {
+      if (!to || !subject || !body) {
         return res.status(400).json({ success: false, error: 'Missing required email fields.' });
       }
 
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: fromEmail, pass: fromPass }
-      });
-
       const attachments = req.files ? req.files.map((file) => ({ filename: file.originalname, path: file.path })) : [];
-      await transporter.sendMail({ from: fromEmail, to, subject, text: body, attachments });
+      await transporter.sendMail({ from: senderEmail, to, subject, text: body, attachments });
 
       if (req.files) req.files.forEach((file) => fs.unlinkSync(file.path));
-      res.json({ success: true });
+      res.json({ success: true, senderEmail });
     } catch (error) {
-      res.status(500).json({ success: false, error: normalizeMailerError(error) });
+      res.status(error.statusCode || 500).json({ success: false, error: normalizeMailerError(error) });
     }
   });
 

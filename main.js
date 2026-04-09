@@ -8,6 +8,11 @@ createIcons({ icons });
 const APPLIED_CACHE_KEY = 'jobApplicator.appliedRecords';
 const THEME_KEY = 'jobApplicator.theme';
 const CLIENT_ID_KEY = 'jobApplicator.clientId';
+const OUTREACH_DRAFT_KEY = 'jobApplicator.outreachDraft';
+const DRAFT_DB_NAME = 'jobApplicatorDrafts';
+const DRAFT_FILE_STORE = 'files';
+const MANUAL_ATTACHMENT_KEY = 'manualAttachments';
+const BULK_RESUME_KEY = 'bulkResume';
 const APPLIED_STATUSES = ['Applied', 'Interviewing', 'Follow-up', 'Rejected', 'Offer'];
 
 let jobs = [];
@@ -19,6 +24,8 @@ let selectedJob = null;
 let selectedAppliedJob = null;
 let outreachContacts = [];
 let outreachVariants = [];
+let savedManualAttachments = [];
+let savedResumeFiles = [];
 
 const clientId = ensureClientId();
 
@@ -53,6 +60,19 @@ const outreachEmptyState = document.getElementById('outreachEmptyState');
 const outreachStatus = document.getElementById('outreachStatus');
 const manualStatus = document.getElementById('manualStatus');
 const scrapeStatus = document.getElementById('scrapeStatus');
+const bulkSenderStatus = document.getElementById('bulkSenderStatus');
+const bulkLoginHint = document.getElementById('bulkLoginHint');
+const manualSenderStatus = document.getElementById('manualSenderStatus');
+const resumeUpload = document.getElementById('resumeUpload');
+const manualToEmailInput = document.getElementById('manualToEmail');
+const manualSubjectInput = document.getElementById('manualSubject');
+const manualBodyInput = document.getElementById('manualBody');
+const manualAttachmentsInput = document.getElementById('manualAttachments');
+const scrapeUrlInput = document.getElementById('scrapeUrl');
+const savedAttachmentInfo = document.getElementById('savedAttachmentInfo');
+const savedResumeInfo = document.getElementById('savedResumeInfo');
+const fireAllMailsBtn = document.getElementById('fireAllMailsBtn');
+const sendManualBtn = document.getElementById('sendManualBtn');
 
 const walkInList = document.getElementById('walkInList');
 const walkInMeta = document.getElementById('walkInMeta');
@@ -60,6 +80,9 @@ const walkInMeta = document.getElementById('walkInMeta');
 setupTabs();
 setupTheme();
 bindEvents();
+restoreOutreachDraft();
+initializeStoredFiles();
+updateSenderUi();
 checkUserSession();
 
 function ensureClientId() {
@@ -141,6 +164,22 @@ function bindEvents() {
   document.getElementById('sendManualBtn').addEventListener('click', sendManualEmail);
   document.getElementById('scrapeBtn').addEventListener('click', scrapeEmailsFromUrl);
   document.getElementById('scanWalkinsBtn').addEventListener('click', scanWalkins);
+
+  [manualToEmailInput, manualSubjectInput, manualBodyInput, scrapeUrlInput].forEach((element) => {
+    element.addEventListener('input', persistOutreachDraft);
+  });
+
+  resumeUpload.addEventListener('change', async () => {
+    savedResumeFiles = Array.from(resumeUpload.files || []);
+    await saveStoredFiles(BULK_RESUME_KEY, savedResumeFiles);
+    renderSavedFileInfo();
+  });
+
+  manualAttachmentsInput.addEventListener('change', async () => {
+    savedManualAttachments = Array.from(manualAttachmentsInput.files || []);
+    await saveStoredFiles(MANUAL_ATTACHMENT_KEY, savedManualAttachments);
+    renderSavedFileInfo();
+  });
 }
 
 async function apiFetch(url, options = {}) {
@@ -177,9 +216,9 @@ async function checkUserSession() {
 
     const userResponse = await apiFetch('/api/user');
     const user = await safeJson(userResponse);
+    currentUser = user;
 
     if (user) {
-      currentUser = user;
       document.getElementById('loginBtn').classList.add('hidden');
       document.getElementById('userProfile').classList.remove('hidden');
       document.getElementById('userName').innerText = user.displayName;
@@ -188,6 +227,8 @@ async function checkUserSession() {
     console.warn('Backend session check failed.', error);
     showBanner('Backend unavailable. Start `node server.js` to enable applied history, outreach, and walk-in scan.', 'warning');
   }
+
+  updateSenderUi();
 
   await loadAppliedRecords();
 }
@@ -230,6 +271,120 @@ function readAppliedCache() {
 
 function persistAppliedCache() {
   localStorage.setItem(APPLIED_CACHE_KEY, JSON.stringify(appliedRecords));
+}
+
+function getDefaultManualBody() {
+  return 'Hi [Recruiter Name],\n\nI wanted to share my profile for opportunities at [Company]. Please find my resume attached.\n\nBest regards,';
+}
+
+function restoreOutreachDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(OUTREACH_DRAFT_KEY) || '{}');
+    manualToEmailInput.value = draft.manualToEmail || '';
+    manualSubjectInput.value = draft.manualSubject || 'Application for relevant opportunity';
+    manualBodyInput.value = draft.manualBody || getDefaultManualBody();
+    scrapeUrlInput.value = draft.scrapeUrl || '';
+  } catch {
+    manualSubjectInput.value = 'Application for relevant opportunity';
+    manualBodyInput.value = getDefaultManualBody();
+  }
+}
+
+function persistOutreachDraft() {
+  localStorage.setItem(OUTREACH_DRAFT_KEY, JSON.stringify({
+    manualToEmail: manualToEmailInput.value.trim(),
+    manualSubject: manualSubjectInput.value.trim(),
+    manualBody: manualBodyInput.value,
+    scrapeUrl: scrapeUrlInput.value.trim()
+  }));
+}
+
+function updateSenderUi() {
+  const senderLabel = currentUser?.email
+    ? `${currentUser.displayName} (${currentUser.email})`
+    : 'Login with Google to use your sender account.';
+
+  const permissionHint = currentUser?.canSendMail
+    ? 'Mail access is ready.'
+    : currentUser?.email
+      ? 'Reconnect with Google if mail permission is missing.'
+      : 'Mail sending is disabled until you log in.';
+
+  bulkSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
+  manualSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
+  bulkLoginHint.classList.toggle('hidden', Boolean(currentUser?.canSendMail));
+  bulkLoginHint.textContent = currentUser?.email ? 'Reconnect Google Sender' : 'Connect Google Sender';
+  fireAllMailsBtn.disabled = !currentUser?.canSendMail;
+  sendManualBtn.disabled = !currentUser?.canSendMail;
+}
+
+function openDraftDatabase() {
+  if (openDraftDatabase.promise) return openDraftDatabase.promise;
+
+  openDraftDatabase.promise = new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DRAFT_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(DRAFT_FILE_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+  return openDraftDatabase.promise;
+}
+
+async function saveStoredFiles(key, files) {
+  const db = await openDraftDatabase();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_FILE_STORE, 'readwrite');
+    tx.objectStore(DRAFT_FILE_STORE).put(files, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function loadStoredFiles(key) {
+  const db = await openDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_FILE_STORE, 'readonly');
+    const request = tx.objectStore(DRAFT_FILE_STORE).get(key);
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function initializeStoredFiles() {
+  try {
+    savedManualAttachments = normalizeStoredFiles(await loadStoredFiles(MANUAL_ATTACHMENT_KEY));
+    savedResumeFiles = normalizeStoredFiles(await loadStoredFiles(BULK_RESUME_KEY));
+  } catch (error) {
+    console.warn('Could not restore saved files.', error);
+    savedManualAttachments = [];
+    savedResumeFiles = [];
+  }
+
+  renderSavedFileInfo();
+}
+
+function normalizeStoredFiles(files) {
+  return (Array.isArray(files) ? files : []).map((file, index) => {
+    if (file instanceof File) return file;
+    return new File([file], file.name || `attachment-${index + 1}`, {
+      type: file.type || 'application/octet-stream',
+      lastModified: file.lastModified || Date.now()
+    });
+  });
+}
+
+function renderSavedFileInfo() {
+  savedAttachmentInfo.textContent = savedManualAttachments.length
+    ? `Saved attachments: ${savedManualAttachments.map((file) => file.name).join(', ')}`
+    : 'No attachments saved yet.';
+
+  savedResumeInfo.textContent = savedResumeFiles[0]
+    ? `Saved resume: ${savedResumeFiles[0].name}`
+    : 'No resume saved yet.';
 }
 
 function refreshCounts() {
@@ -829,12 +984,15 @@ function renderOutreachContacts() {
 }
 
 async function sendBulkOutreach() {
-  const email = document.getElementById('gmailAddress').value.trim();
-  const password = document.getElementById('gmailPassword').value.trim();
-  const resume = document.getElementById('resumeUpload').files[0];
+  const resume = savedResumeFiles[0] || resumeUpload.files[0];
 
-  if (!email || !password || !resume) {
-    setInlineStatus(outreachStatus, 'Add sender Gmail, app password, and a resume PDF first.', 'warning');
+  if (!currentUser?.canSendMail) {
+    setInlineStatus(outreachStatus, 'Login with Google and approve Gmail access before sending outreach.', 'warning');
+    return;
+  }
+
+  if (!resume) {
+    setInlineStatus(outreachStatus, 'Add a resume PDF first. It will stay saved until you change it.', 'warning');
     return;
   }
 
@@ -848,10 +1006,8 @@ async function sendBulkOutreach() {
   }));
 
   const payload = new FormData();
-  payload.append('email', email);
-  payload.append('password', password);
   payload.append('contacts', JSON.stringify(contacts));
-  payload.append('resume', resume);
+  payload.append('resume', resume, resume.name);
 
   const button = document.getElementById('fireAllMailsBtn');
   button.disabled = true;
@@ -869,7 +1025,7 @@ async function sendBulkOutreach() {
 
     const successCount = data.results.filter((item) => item.status === 'Sent').length;
     const failureCount = data.results.length - successCount;
-    setInlineStatus(outreachStatus, `Bulk outreach finished. Sent: ${successCount}, failed: ${failureCount}.`, failureCount ? 'warning' : 'success');
+    setInlineStatus(outreachStatus, `Bulk outreach finished from ${data.senderEmail}. Sent: ${successCount}, failed: ${failureCount}.`, failureCount ? 'warning' : 'success');
   } catch (error) {
     setInlineStatus(outreachStatus, error.message || 'Bulk outreach failed.', 'error');
   } finally {
@@ -880,25 +1036,26 @@ async function sendBulkOutreach() {
 }
 
 async function sendManualEmail() {
-  const fromEmail = document.getElementById('manualFromEmail').value.trim();
-  const fromPass = document.getElementById('manualFromPass').value.trim();
-  const to = document.getElementById('manualToEmail').value.trim();
-  const subject = document.getElementById('manualSubject').value.trim();
-  const body = document.getElementById('manualBody').value.trim();
-  const files = document.getElementById('manualAttachments').files;
+  const to = manualToEmailInput.value.trim();
+  const subject = personalizeTemplate(manualSubjectInput.value.trim(), to);
+  const body = personalizeTemplate(manualBodyInput.value.trim(), to);
+  const files = savedManualAttachments.length ? savedManualAttachments : Array.from(manualAttachmentsInput.files || []);
 
-  if (!fromEmail || !fromPass || !to || !subject || !body) {
-    setInlineStatus(manualStatus, 'Fill every manual email field before sending.', 'warning');
+  if (!currentUser?.canSendMail) {
+    setInlineStatus(manualStatus, 'Login with Google and approve Gmail access before sending mail.', 'warning');
+    return;
+  }
+
+  if (!to || !subject || !body) {
+    setInlineStatus(manualStatus, 'Fill receiver email, subject, and body before sending.', 'warning');
     return;
   }
 
   const payload = new FormData();
-  payload.append('fromEmail', fromEmail);
-  payload.append('fromPass', fromPass);
   payload.append('to', to);
   payload.append('subject', subject);
   payload.append('body', body);
-  Array.from(files).forEach((file) => payload.append('attachments', file));
+  files.forEach((file) => payload.append('attachments', file, file.name));
 
   const button = document.getElementById('sendManualBtn');
   button.disabled = true;
@@ -911,7 +1068,7 @@ async function sendManualEmail() {
     });
     const data = await safeJson(response);
     if (!data.success) throw new Error(data.error || 'Manual send failed.');
-    setInlineStatus(manualStatus, `Email sent successfully to ${to}.`, 'success');
+    setInlineStatus(manualStatus, `Email sent successfully from ${data.senderEmail} to ${to}.`, 'success');
   } catch (error) {
     setInlineStatus(manualStatus, error.message || 'Manual email failed.', 'error');
   } finally {
@@ -954,7 +1111,8 @@ async function scrapeEmailsFromUrl() {
       const item = document.createElement('li');
       item.innerHTML = `<span>${email}</span><button class="secondary-btn btn-sm" type="button">Use</button>`;
       item.querySelector('button').addEventListener('click', () => {
-        document.getElementById('manualToEmail').value = email;
+        manualToEmailInput.value = email;
+        persistOutreachDraft();
         setInlineStatus(manualStatus, `${email} copied into the manual receiver field.`, 'info');
       });
       list.appendChild(item);
@@ -1038,6 +1196,45 @@ function truncate(value, length) {
 
 function firstName(name) {
   return (name || 'Recruiter').trim().split(/\s+/)[0];
+}
+
+function findContactByEmail(email) {
+  const normalized = email.toLowerCase();
+  return outreachContacts.find((contact) => contact.email.toLowerCase() === normalized) || null;
+}
+
+function deriveNameFromEmail(email) {
+  const localPart = email.split('@')[0] || 'Recruiter';
+  return localPart
+    .replace(/[._-]+/g, ' ')
+    .replace(/\d+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ') || 'Recruiter';
+}
+
+function deriveCompanyFromEmail(email) {
+  const domain = email.split('@')[1] || '';
+  const root = domain.split('.')[0] || '';
+  return root
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase()) || 'your company';
+}
+
+function personalizeTemplate(template, email) {
+  const contact = findContactByEmail(email);
+  const resolvedName = contact?.name || deriveNameFromEmail(email);
+  const resolvedCompany = contact?.company || deriveCompanyFromEmail(email);
+
+  let value = template
+    .replace(/\[Recruiter Name\]|\[First Name\]/gi, firstName(resolvedName))
+    .replace(/\[Full Name\]/gi, resolvedName)
+    .replace(/\[Company\]/gi, resolvedCompany);
+
+  value = value.replace(/^\s*(Hi|Hello)\s*,/i, `Hi ${firstName(resolvedName)},`);
+  return value;
 }
 
 function formatShortDate(value) {

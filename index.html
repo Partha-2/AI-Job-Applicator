@@ -174,19 +174,17 @@
                 <div id="outreachStatus" class="inline-status hidden"></div>
 
                 <div id="automationConfig" class="automation-form hidden">
-                  <div class="form-group grid-2">
+                  <div class="sender-panel">
                     <div>
-                      <label>Sender Gmail</label>
-                      <input type="email" id="gmailAddress" class="input-field" placeholder="you@gmail.com" />
+                      <label>Sender Account</label>
+                      <div id="bulkSenderStatus" class="saved-draft">Login with Google to send from your account.</div>
                     </div>
-                    <div>
-                      <label>Gmail App Password</label>
-                      <input type="password" id="gmailPassword" class="input-field" placeholder="16-letter app password" />
-                    </div>
+                    <a href="/auth/google" id="bulkLoginHint" class="secondary-btn">Connect Google Sender</a>
                   </div>
                   <div class="form-group">
                     <label>Resume (PDF)</label>
                     <input type="file" id="resumeUpload" class="file-styled" accept=".pdf" />
+                    <div id="savedResumeInfo" class="saved-draft">No resume saved yet.</div>
                   </div>
                   <button class="primary-btn w-full" id="fireAllMailsBtn"><i data-lucide="zap"></i> Send Bulk Outreach</button>
                 </div>
@@ -227,12 +225,8 @@
 
                 <div class="manual-form">
                   <div class="form-group">
-                    <label>Sender Email</label>
-                    <input type="email" id="manualFromEmail" class="input-field" placeholder="Your Gmail" />
-                  </div>
-                  <div class="form-group">
-                    <label>App Password</label>
-                    <input type="password" id="manualFromPass" class="input-field" placeholder="App password" />
+                    <label>Sender Account</label>
+                    <div id="manualSenderStatus" class="saved-draft">Login with Google to send mail from your account.</div>
                   </div>
                   <div class="form-group">
                     <label>Receiver Email</label>
@@ -244,11 +238,13 @@
                   </div>
                   <div class="form-group">
                     <label>Body</label>
-                    <textarea id="manualBody" class="input-field textarea" rows="7" placeholder="Write your outreach message..."></textarea>
+                    <textarea id="manualBody" class="input-field textarea" rows="7" placeholder="Use [Recruiter Name] and [Company] for automatic personalization."></textarea>
+                    <div class="saved-draft">This draft auto-saves locally. Greeting placeholders update per receiver.</div>
                   </div>
                   <div class="form-group">
                     <label>Attachments</label>
                     <input type="file" id="manualAttachments" multiple class="file-styled" />
+                    <div id="savedAttachmentInfo" class="saved-draft">No attachments saved yet.</div>
                   </div>
                   <button class="primary-btn w-full" id="sendManualBtn"><i data-lucide="send"></i> Send Email</button>
                   <div id="manualStatus" class="inline-status hidden"></div>
