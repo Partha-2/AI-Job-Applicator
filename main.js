@@ -73,7 +73,6 @@ const savedAttachmentInfo = document.getElementById('savedAttachmentInfo');
 const savedResumeInfo = document.getElementById('savedResumeInfo');
 const fireAllMailsBtn = document.getElementById('fireAllMailsBtn');
 const sendManualBtn = document.getElementById('sendManualBtn');
-const headerLoginBtn = document.getElementById('loginBtn');
 
 const walkInList = document.getElementById('walkInList');
 const walkInMeta = document.getElementById('walkInMeta');
@@ -319,9 +318,6 @@ function updateSenderUi() {
   sendManualBtn.disabled = !currentUser?.canSendMail;
 
   document.getElementById('userProfile').classList.toggle('hidden', !currentUser?.email);
-  headerLoginBtn.classList.toggle('hidden', Boolean(currentUser?.email));
-  headerLoginBtn.innerHTML = '<i data-lucide="log-in"></i> Login with Google';
-  headerLoginBtn.href = '/auth/google';
   createIcons({ icons });
 }
 
