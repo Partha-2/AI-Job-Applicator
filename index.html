@@ -25,6 +25,7 @@
             <span id="userName">User</span>
             <a href="/auth/logout" class="icon-btn" title="Logout"><i data-lucide="log-out"></i></a>
           </div>
+          <button id="loginBtn" class="primary-btn"><i data-lucide="log-in"></i> Login</button>
           <button id="themeToggle" class="icon-btn" title="Toggle theme">
             <i data-lucide="sun-medium"></i>
           </button>
@@ -51,6 +52,19 @@
         </section>
 
         <div id="appStatus" class="status-banner hidden"></div>
+
+        <section id="authPanel" class="glass-card auth-panel">
+          <div>
+            <p class="eyebrow">Login</p>
+            <h2>Sign in to save your tracker.</h2>
+            <p class="muted-text">Use a simple name and email login for job tracking. Gmail connect is optional and only needed inside Outreach.</p>
+          </div>
+          <div class="auth-grid">
+            <input type="text" id="quickLoginName" class="input-field" placeholder="Your name" />
+            <input type="email" id="quickLoginEmail" class="input-field" placeholder="Your email" />
+            <button class="primary-btn" id="quickLoginBtn"><i data-lucide="arrow-right"></i> Continue</button>
+          </div>
+        </section>
 
         <div class="tabs" id="mainTabs">
           <button class="tab-btn active" data-target="jobsTabContent">Jobs Dashboard</button>

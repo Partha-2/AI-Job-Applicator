@@ -86,7 +86,7 @@ function buildAppliedRecord(payload) {
 }
 
 function getSessionUser(req) {
-  return req.user || null;
+  return req.user || req.session?.localUser || null;
 }
 
 function buildPublicUser(user) {
@@ -410,7 +410,34 @@ export function createApp() {
     });
   });
 
+  app.post('/auth/local-login', (req, res) => {
+    const name = (req.body?.name || '').toString().trim();
+    const email = (req.body?.email || '').toString().trim().toLowerCase();
+
+    if (!name || !email) {
+      return res.status(400).json({ error: 'Name and email are required.' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
+
+    req.session.localUser = {
+      id: `local:${email}`,
+      displayName: name,
+      email,
+      provider: 'local'
+    };
+
+    res.json({ success: true, user: buildPublicUser(req.session.localUser) });
+  });
+
   app.get('/auth/logout', (req, res, next) => {
+    if (req.session) {
+      req.session.localUser = null;
+    }
+
     if (req.user && typeof req.logout === 'function') {
       req.logout((err) => {
         if (err) return next(err);
@@ -419,7 +446,9 @@ export function createApp() {
       return;
     }
 
-    res.redirect(frontendUrl);
+    req.session?.destroy?.(() => {
+      res.redirect(frontendUrl);
+    });
   });
 
   app.get('/api/applied-jobs', (req, res) => {

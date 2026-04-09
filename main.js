@@ -39,6 +39,10 @@ const paginationControls = document.getElementById('paginationControls');
 const jobDetailsEmptyState = document.getElementById('detailsEmptyState');
 const jobDetailsContent = document.getElementById('detailsContent');
 const appStatus = document.getElementById('appStatus');
+const authPanel = document.getElementById('authPanel');
+const quickLoginName = document.getElementById('quickLoginName');
+const quickLoginEmail = document.getElementById('quickLoginEmail');
+const quickLoginBtn = document.getElementById('quickLoginBtn');
 
 const heroPendingCount = document.getElementById('heroPendingCount');
 const heroAppliedCount = document.getElementById('heroAppliedCount');
@@ -73,6 +77,7 @@ const savedAttachmentInfo = document.getElementById('savedAttachmentInfo');
 const savedResumeInfo = document.getElementById('savedResumeInfo');
 const fireAllMailsBtn = document.getElementById('fireAllMailsBtn');
 const sendManualBtn = document.getElementById('sendManualBtn');
+const headerLoginBtn = document.getElementById('loginBtn');
 
 const walkInList = document.getElementById('walkInList');
 const walkInMeta = document.getElementById('walkInMeta');
@@ -164,9 +169,23 @@ function bindEvents() {
   document.getElementById('sendManualBtn').addEventListener('click', sendManualEmail);
   document.getElementById('scrapeBtn').addEventListener('click', scrapeEmailsFromUrl);
   document.getElementById('scanWalkinsBtn').addEventListener('click', scanWalkins);
+  quickLoginBtn.addEventListener('click', submitQuickLogin);
+  headerLoginBtn.addEventListener('click', () => {
+    authPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    quickLoginName.focus();
+  });
 
   [manualToEmailInput, manualSubjectInput, manualBodyInput, scrapeUrlInput].forEach((element) => {
     element.addEventListener('input', persistOutreachDraft);
+  });
+
+  [quickLoginName, quickLoginEmail].forEach((element) => {
+    element.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submitQuickLogin();
+      }
+    });
   });
 
   resumeUpload.addEventListener('change', async () => {
@@ -301,7 +320,7 @@ function persistOutreachDraft() {
 function updateSenderUi() {
   const senderLabel = currentUser?.email
     ? `${currentUser.displayName} (${currentUser.email})`
-    : 'Login with Google to use your sender account.';
+    : 'Log in to save your tracker. Gmail connect is optional.';
 
   const permissionHint = currentUser?.canSendMail
     ? 'Mail access is ready.'
@@ -317,8 +336,45 @@ function updateSenderUi() {
   fireAllMailsBtn.disabled = !currentUser?.canSendMail;
   sendManualBtn.disabled = !currentUser?.canSendMail;
 
+  authPanel.classList.toggle('hidden', Boolean(currentUser?.email));
   document.getElementById('userProfile').classList.toggle('hidden', !currentUser?.email);
+  headerLoginBtn.classList.toggle('hidden', Boolean(currentUser?.email));
   createIcons({ icons });
+}
+
+async function submitQuickLogin() {
+  const name = quickLoginName.value.trim();
+  const email = quickLoginEmail.value.trim().toLowerCase();
+
+  if (!name || !email) {
+    showBanner('Enter your name and email to continue.', 'warning');
+    return;
+  }
+
+  quickLoginBtn.disabled = true;
+  quickLoginBtn.textContent = 'Signing in...';
+
+  try {
+    const response = await apiFetch('/auth/local-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email })
+    });
+    const data = await safeJson(response);
+    if (!response.ok) throw new Error(data.error || 'Login failed.');
+
+    currentUser = data.user;
+    document.getElementById('userName').innerText = currentUser.displayName;
+    updateSenderUi();
+    await loadAppliedRecords();
+    showBanner(`Logged in as ${currentUser.displayName}.`, 'success');
+  } catch (error) {
+    showBanner(error.message || 'Login failed.', 'error');
+  } finally {
+    quickLoginBtn.disabled = false;
+    quickLoginBtn.innerHTML = '<i data-lucide="arrow-right"></i> Continue';
+    createIcons({ icons });
+  }
 }
 
 function openDraftDatabase() {
