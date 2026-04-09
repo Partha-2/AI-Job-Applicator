@@ -6,7 +6,8 @@ import fs from 'fs';
 import path from 'path';
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import session from 'express-session';
+import jwt from 'jsonwebtoken';
+import cookieParser from 'cookie-parser';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
@@ -85,8 +86,43 @@ function buildAppliedRecord(payload) {
   };
 }
 
+const JWT_SECRET = process.env.SESSION_SECRET || 'job-applicator-jwt-secret';
+
+function signUserToken(user) {
+  return jwt.sign({ user }, JWT_SECRET, { expiresIn: '7d' });
+}
+
+function getUserFromToken(req) {
+  try {
+    const token = req.cookies?.auth_token;
+    if (!token) return null;
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded.user || null;
+  } catch {
+    return null;
+  }
+}
+
+function setAuthCookie(res, user) {
+  const token = signUserToken(user);
+  res.cookie('auth_token', token, {
+    httpOnly: true,
+    secure: process.env.VERCEL ? true : false,
+    sameSite: process.env.VERCEL ? 'none' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  });
+}
+
+function clearAuthCookie(res) {
+  res.clearCookie('auth_token', {
+    httpOnly: true,
+    secure: process.env.VERCEL ? true : false,
+    sameSite: process.env.VERCEL ? 'none' : 'lax'
+  });
+}
+
 function getSessionUser(req) {
-  return req.user || req.session?.localUser || null;
+  return getUserFromToken(req);
 }
 
 function buildPublicUser(user) {
@@ -375,23 +411,13 @@ export function createApp() {
     credentials: true
   }));
   app.use(express.json());
-  app.use(session({
-    secret: process.env.SESSION_SECRET || 'job-applicator-secret',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      httpOnly: true
-    }
-  }));
-  app.use(passport.initialize());
-  app.use(passport.session());
+  app.use(cookieParser());
 
-  const upload = multer({ dest: process.env.VERCEL ? '/tmp' : 'uploads/' });
-
+  // Passport only used to facilitate the OAuth redirect/callback — user is then stored in a JWT cookie
   passport.serializeUser((user, done) => done(null, user));
   passport.deserializeUser((user, done) => done(null, user));
+
+  const upload = multer({ dest: process.env.VERCEL ? '/tmp' : 'uploads/' });
 
   const loginClientId = process.env.GOOGLE_LOGIN_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
   const loginClientSecret = process.env.GOOGLE_LOGIN_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
@@ -406,20 +432,19 @@ export function createApp() {
       clientSecret: loginClientSecret,
       callbackURL: loginCallbackUrl,
       passReqToCallback: true
-    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(getSessionUser(req), profile, accessToken, refreshToken))));
+    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(getUserFromToken(req), profile, accessToken, refreshToken))));
 
-    app.get('/auth/google', passport.authenticate('google-login', {
-      scope: ['profile', 'email']
-    }));
+    app.get('/auth/google', passport.authenticate('google-login', { scope: ['profile', 'email'], session: false }));
     app.get('/auth/google/callback',
-      passport.authenticate('google-login', { failureRedirect: `${frontendUrl}?loginError=oauth` }),
+      passport.authenticate('google-login', { failureRedirect: `${frontendUrl}?loginError=oauth`, session: false }),
       (req, res) => {
+        setAuthCookie(res, req.user);
         res.redirect(frontendUrl);
       }
     );
   } else {
-    console.warn('Google login OAuth keys missing or default. Google sign-in disabled.');
-    app.get('/auth/google', (req, res) => res.status(501).json({ error: 'OAuth not configured. Please add keys to .env' }));
+    console.warn('Google login OAuth keys missing. Google sign-in disabled.');
+    app.get('/auth/google', (req, res) => res.status(501).json({ error: 'OAuth not configured.' }));
   }
 
   if (gmailClientId && gmailClientId !== 'your_google_client_id_here' && gmailClientSecret) {
@@ -428,28 +453,27 @@ export function createApp() {
       clientSecret: gmailClientSecret,
       callbackURL: gmailCallbackUrl,
       passReqToCallback: true
-    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(getSessionUser(req), profile, accessToken, refreshToken))));
+    }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(getUserFromToken(req), profile, accessToken, refreshToken))));
 
     app.get('/auth/google-gmail', passport.authenticate('google-gmail', {
       scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.send'],
-      accessType: 'offline',
-      prompt: 'consent',
-      includeGrantedScopes: true
+      accessType: 'offline', prompt: 'consent', includeGrantedScopes: true, session: false
     }));
-
     app.get('/auth/google-gmail/callback',
-      passport.authenticate('google-gmail', { failureRedirect: `${frontendUrl}?gmailError=oauth` }),
+      passport.authenticate('google-gmail', { failureRedirect: `${frontendUrl}?gmailError=oauth`, session: false }),
       (req, res) => {
+        setAuthCookie(res, req.user);
         res.redirect(frontendUrl);
       }
     );
   } else {
-    console.warn('Google Gmail OAuth keys missing or default. Gmail sender connect disabled.');
-    app.get('/auth/google-gmail', (req, res) => res.status(501).json({ error: 'Gmail OAuth not configured. Please add Gmail OAuth keys to .env' }));
+    console.warn('Gmail OAuth keys missing. Gmail sender connect disabled.');
+    app.get('/auth/google-gmail', (req, res) => res.status(501).json({ error: 'Gmail OAuth not configured.' }));
   }
 
   app.get('/api/user', (req, res) => {
-    res.json(buildPublicUser(getSessionUser(req)));
+    const user = getUserFromToken(req);
+    res.json(buildPublicUser(user));
   });
 
   app.get('/api/health', (req, res) => {
@@ -463,41 +487,18 @@ export function createApp() {
     const name = (req.body?.name || '').toString().trim();
     const email = (req.body?.email || '').toString().trim().toLowerCase();
 
-    if (!name || !email) {
-      return res.status(400).json({ error: 'Name and email are required.' });
-    }
-
+    if (!name || !email) return res.status(400).json({ error: 'Name and email are required.' });
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Enter a valid email address.' });
-    }
+    if (!emailRegex.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
 
-    req.session.localUser = {
-      id: `local:${email}`,
-      displayName: name,
-      email,
-      provider: 'local'
-    };
-
-    res.json({ success: true, user: buildPublicUser(req.session.localUser) });
+    const user = { id: `local:${email}`, displayName: name, email, provider: 'local' };
+    setAuthCookie(res, user);
+    res.json({ success: true, user: buildPublicUser(user) });
   });
 
-  app.get('/auth/logout', (req, res, next) => {
-    if (req.session) {
-      req.session.localUser = null;
-    }
-
-    if (req.user && typeof req.logout === 'function') {
-      req.logout((err) => {
-        if (err) return next(err);
-        res.redirect(frontendUrl);
-      });
-      return;
-    }
-
-    req.session?.destroy?.(() => {
-      res.redirect(frontendUrl);
-    });
+  app.get('/auth/logout', (req, res) => {
+    clearAuthCookie(res);
+    res.redirect(frontendUrl);
   });
 
   app.get('/api/applied-jobs', (req, res) => {
