@@ -5,8 +5,8 @@ export default defineConfig({
     port: 5173,
     open: true,
     proxy: {
-      '/api': 'https://ai-job-applicator.vercel.app',
-      '/auth': 'https://ai-job-applicator.vercel.app'
+      '/api': 'http://localhost:3000',
+      '/auth': 'http://localhost:3000'
     }
   }
 });

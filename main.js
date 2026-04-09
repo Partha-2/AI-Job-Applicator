@@ -5,470 +5,1052 @@ import * as xlsx from 'xlsx';
 
 createIcons({ icons });
 
-// State
-let jobs = [];
-let currentPage = 1;
-const pageSize = 12;
-let currentUser = null;
-let serverAppliedJobs = [];
+const APPLIED_CACHE_KEY = 'jobApplicator.appliedRecords';
+const THEME_KEY = 'jobApplicator.theme';
+const CLIENT_ID_KEY = 'jobApplicator.clientId';
+const APPLIED_STATUSES = ['Applied', 'Interviewing', 'Follow-up', 'Rejected', 'Offer'];
 
+let jobs = [];
+let appliedRecords = [];
+let currentPage = 1;
+const pageSize = 14;
+let currentUser = null;
+let selectedJob = null;
+let selectedAppliedJob = null;
 let outreachContacts = [];
 let outreachVariants = [];
 
-// DOM Elements
+const clientId = ensureClientId();
+
 const fileInput = document.getElementById('fileInput');
 const uploadSection = document.getElementById('uploadSection');
 const dashboardSection = document.getElementById('dashboardSection');
 const jobList = document.getElementById('jobList');
 const jobCount = document.getElementById('jobCount');
 const resetBtn = document.getElementById('resetBtn');
+const paginationControls = document.getElementById('paginationControls');
+const jobDetailsEmptyState = document.getElementById('detailsEmptyState');
+const jobDetailsContent = document.getElementById('detailsContent');
+const appStatus = document.getElementById('appStatus');
+
+const heroPendingCount = document.getElementById('heroPendingCount');
+const heroAppliedCount = document.getElementById('heroAppliedCount');
+const appliedCount = document.getElementById('appliedCount');
+const appliedTotalMetric = document.getElementById('appliedTotalMetric');
+const interviewMetric = document.getElementById('interviewMetric');
+const offerMetric = document.getElementById('offerMetric');
+const appliedUpdatedAt = document.getElementById('appliedUpdatedAt');
+const appliedList = document.getElementById('appliedList');
+const appliedDetailsEmpty = document.getElementById('appliedDetailsEmpty');
+const appliedDetailsContent = document.getElementById('appliedDetailsContent');
+
 const tabBtns = document.querySelectorAll('.tab-btn');
-const jobsTabContent = document.getElementById('jobsTabContent');
-const outreachSection = document.getElementById('outreachSection');
-const walkInSection = document.getElementById('walkInSection');
+const tabPanels = document.querySelectorAll('.tab-panel');
+
 const outreachFileInput = document.getElementById('outreachFileInput');
 const outreachList = document.getElementById('outreachList');
 const outreachEmptyState = document.getElementById('outreachEmptyState');
-const paginationControls = document.getElementById('paginationControls');
+const outreachStatus = document.getElementById('outreachStatus');
+const manualStatus = document.getElementById('manualStatus');
+const scrapeStatus = document.getElementById('scrapeStatus');
 
-// Tab Logic
-tabBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    tabBtns.forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    
-    jobsTabContent.classList.add('hidden');
-    outreachSection.classList.add('hidden');
-    walkInSection.classList.add('hidden');
-    
-    const target = btn.dataset.target;
-    document.getElementById(target).classList.remove('hidden');
+const walkInList = document.getElementById('walkInList');
+const walkInMeta = document.getElementById('walkInMeta');
+
+setupTabs();
+setupTheme();
+bindEvents();
+checkUserSession();
+
+function ensureClientId() {
+  const existing = localStorage.getItem(CLIENT_ID_KEY);
+  if (existing) return existing;
+
+  const generated = globalThis.crypto?.randomUUID?.() || `client-${Math.random().toString(36).slice(2)}${Date.now()}`;
+  localStorage.setItem(CLIENT_ID_KEY, generated);
+  return generated;
+}
+
+function setupTabs() {
+  tabBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.target;
+      tabBtns.forEach((item) => item.classList.toggle('active', item === btn));
+      tabPanels.forEach((panel) => panel.classList.toggle('hidden', panel.id !== target));
+    });
   });
-});
+}
 
-// OAuth & User State
+function setupTheme() {
+  const savedTheme = localStorage.getItem(THEME_KEY) || 'theme-dark';
+  document.body.classList.remove('theme-dark', 'theme-light');
+  document.body.classList.add(savedTheme);
+
+  document.getElementById('themeToggle').addEventListener('click', () => {
+    const nextTheme = document.body.classList.contains('theme-dark') ? 'theme-light' : 'theme-dark';
+    document.body.classList.remove('theme-dark', 'theme-light');
+    document.body.classList.add(nextTheme);
+    localStorage.setItem(THEME_KEY, nextTheme);
+  });
+}
+
+function bindEvents() {
+  fileInput.addEventListener('change', handleFileUpload);
+  uploadSection.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    uploadSection.classList.add('dragover');
+  });
+  uploadSection.addEventListener('dragleave', () => uploadSection.classList.remove('dragover'));
+  uploadSection.addEventListener('drop', (event) => {
+    event.preventDefault();
+    uploadSection.classList.remove('dragover');
+    if (event.dataTransfer.files.length) {
+      fileInput.files = event.dataTransfer.files;
+      handleFileUpload();
+    }
+  });
+
+  resetBtn.addEventListener('click', () => {
+    jobs = [];
+    selectedJob = null;
+    fileInput.value = '';
+    uploadSection.classList.remove('hidden');
+    dashboardSection.classList.add('hidden');
+    renderJobs();
+    renderJobDetails();
+    showBanner('Upload reset. You can import a fresh jobs file now.', 'info');
+  });
+
+  document.getElementById('prevPageBtn').addEventListener('click', () => {
+    if (currentPage > 1) {
+      currentPage -= 1;
+      renderJobs();
+    }
+  });
+
+  document.getElementById('nextPageBtn').addEventListener('click', () => {
+    const pendingJobs = jobs.filter((job) => !job.applied);
+    if (currentPage * pageSize < pendingJobs.length) {
+      currentPage += 1;
+      renderJobs();
+    }
+  });
+
+  outreachFileInput.addEventListener('change', handleOutreachUpload);
+  document.getElementById('fireAllMailsBtn').addEventListener('click', sendBulkOutreach);
+  document.getElementById('sendManualBtn').addEventListener('click', sendManualEmail);
+  document.getElementById('scrapeBtn').addEventListener('click', scrapeEmailsFromUrl);
+  document.getElementById('scanWalkinsBtn').addEventListener('click', scanWalkins);
+}
+
+async function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set('x-client-id', clientId);
+
+  return fetch(url, {
+    credentials: 'include',
+    ...options,
+    headers
+  });
+}
+
+async function safeJson(response) {
+  const text = await response.text();
+  if (!text) {
+    if (!response.ok) {
+      throw new Error(`Backend request failed (${response.status}). Make sure the API server is running on port 3000.`);
+    }
+    throw new Error('Backend returned an empty response. Make sure the API server is running on port 3000.');
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Backend returned invalid JSON for ${new URL(response.url).pathname || 'this request'}.`);
+  }
+}
+
 async function checkUserSession() {
   try {
-    const res = await fetch('/api/user');
-    const user = await res.json();
+    const healthResponse = await apiFetch('/api/health');
+    await safeJson(healthResponse);
+
+    const userResponse = await apiFetch('/api/user');
+    const user = await safeJson(userResponse);
+
     if (user) {
       currentUser = user;
       document.getElementById('loginBtn').classList.add('hidden');
       document.getElementById('userProfile').classList.remove('hidden');
       document.getElementById('userName').innerText = user.displayName;
-      
-      // Fetch applied jobs from server
-      const appliedRes = await fetch('/api/applied-jobs');
-      serverAppliedJobs = await appliedRes.json();
     }
-  } catch (e) {
-    console.warn("Backend session check failed.");
+  } catch (error) {
+    console.warn('Backend session check failed.', error);
+    showBanner('Backend unavailable. Start `node server.js` to enable applied history, outreach, and walk-in scan.', 'warning');
+  }
+
+  await loadAppliedRecords();
+}
+
+async function loadAppliedRecords() {
+  try {
+    const response = await apiFetch('/api/applied-jobs');
+    if (!response.ok) throw new Error('Unable to load applied history.');
+    appliedRecords = await safeJson(response);
+    persistAppliedCache();
+  } catch (error) {
+    appliedRecords = readAppliedCache();
+  }
+
+  if (!selectedAppliedJob && appliedRecords.length > 0) {
+    selectedAppliedJob = appliedRecords[0];
+  }
+
+  if (jobs.length > 0) {
+    const appliedIds = new Set(appliedRecords.map((record) => record.id));
+    jobs = jobs.map((job) => ({ ...job, applied: appliedIds.has(job.id) }));
+    if (selectedJob?.id && appliedIds.has(selectedJob.id)) {
+      selectedJob = jobs.find((job) => !job.applied) || null;
+    }
+    renderJobs();
+    renderJobDetails();
+  }
+
+  renderAppliedTracker();
+  refreshCounts();
+}
+
+function readAppliedCache() {
+  try {
+    return JSON.parse(localStorage.getItem(APPLIED_CACHE_KEY) || '[]');
+  } catch {
+    return [];
   }
 }
 
-checkUserSession();
+function persistAppliedCache() {
+  localStorage.setItem(APPLIED_CACHE_KEY, JSON.stringify(appliedRecords));
+}
 
-// File Upload Event Listeners for Jobs
-fileInput.addEventListener('change', handleFileUpload);
-uploadSection.addEventListener('dragover', (e) => { e.preventDefault(); uploadSection.classList.add('dragover'); });
-uploadSection.addEventListener('dragleave', () => { uploadSection.classList.remove('dragover'); });
-uploadSection.addEventListener('drop', (e) => {
-  e.preventDefault();
-  uploadSection.classList.remove('dragover');
-  if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; handleFileUpload(); }
-});
+function refreshCounts() {
+  const pendingCount = jobs.filter((job) => !job.applied).length;
+  heroPendingCount.textContent = pendingCount;
+  heroAppliedCount.textContent = appliedRecords.length;
+}
 
-resetBtn.addEventListener('click', () => {
-  jobs = [];
-  dashboardSection.classList.add('hidden');
-  uploadSection.classList.remove('hidden');
-  fileInput.value = '';
-});
+function showBanner(message, tone = 'info') {
+  appStatus.textContent = message;
+  appStatus.className = `status-banner ${tone}`;
+  appStatus.classList.remove('hidden');
+
+  window.clearTimeout(showBanner.timer);
+  showBanner.timer = window.setTimeout(() => {
+    appStatus.classList.add('hidden');
+  }, 3200);
+}
+
+function setInlineStatus(element, message, tone = 'info') {
+  element.textContent = message;
+  element.className = `inline-status ${tone}`;
+  element.classList.remove('hidden');
+}
 
 function handleFileUpload() {
   const file = fileInput.files[0];
   if (!file) return;
-  const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
-  if (ext === 'xlsx' || ext === 'xls') parseExcel(file); else parseCSV(file);
+
+  const extension = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+  if (extension === 'xlsx' || extension === 'xls') {
+    parseExcel(file);
+  } else {
+    parseCSV(file);
+  }
 }
 
 function parseCSV(file) {
   Papa.parse(file, {
-    header: true, skipEmptyLines: true,
+    header: true,
+    skipEmptyLines: true,
     complete: (results) => processExtractedData(results.data),
-    error: (err) => { console.error(err); alert('Error parsing CSV file'); }
+    error: () => showBanner('Could not parse the CSV file.', 'error')
   });
 }
 
 function parseExcel(file) {
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = (event) => {
     try {
-      const data = new Uint8Array(e.target.result);
+      const data = new Uint8Array(event.target.result);
       const workbook = xlsx.read(data, { type: 'array' });
-      const firstSheetName = workbook.SheetNames[0];
-      const json = xlsx.utils.sheet_to_json(workbook.Sheets[firstSheetName]);
+      const firstSheet = workbook.SheetNames[0];
+      const json = xlsx.utils.sheet_to_json(workbook.Sheets[firstSheet]);
       processExtractedData(json);
-    } catch(err) { alert('Error parsing Excel file'); }
+    } catch {
+      showBanner('Could not parse the Excel file.', 'error');
+    }
   };
   reader.readAsArrayBuffer(file);
 }
 
 function processExtractedData(data) {
-  if (!data || data.length === 0) return alert('The uploaded file is empty.');
+  if (!data || data.length === 0) {
+    showBanner('The uploaded file is empty.', 'warning');
+    return;
+  }
+
   jobs = data.map(normalizeJobRow);
-  if (jobs.length === 0) return alert('Could not find any valid jobs.');
+  currentPage = 1;
+  selectedJob = jobs.find((job) => !job.applied) || jobs[0] || null;
+
   uploadSection.classList.add('hidden');
   dashboardSection.classList.remove('hidden');
-  tabBtns[0].click();
-  currentPage = 1;
   renderJobs();
+  renderJobDetails();
+  refreshCounts();
+  showBanner(`Imported ${jobs.length} jobs. Pending roles are ready to review.`, 'success');
 }
 
 function normalizeJobRow(row) {
-  const getVal = (keys) => {
-    for (let key of keys) {
+  const getValue = (keys) => {
+    for (const key of keys) {
       if (row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
     }
-    const foundKey = Object.keys(row).find(k => {
-      const lowerK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
-      return keys.some(kw => lowerK.includes(kw.replace(/[^a-z0-9]/g, '')));
+
+    const fuzzyKey = Object.keys(row).find((key) => {
+      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return keys.some((candidate) => normalized.includes(candidate.toLowerCase().replace(/[^a-z0-9]/g, '')));
     });
-    return foundKey ? row[foundKey] : null;
+
+    return fuzzyKey ? row[fuzzyKey] : null;
   };
 
-  const id = getVal(['id', 'jobId']) || Math.random().toString(36).substr(2, 9);
-  const title = getVal(['title', 'jobtitle', 'role', 'position']) || 'Unknown Title';
-  const company = getVal(['company/name', 'company', 'employer', 'org']) || 'Unknown Company';
-  const description = getVal(['descriptionText', 'descriptionHtml', 'description', 'jd', 'detail']) || 'No description provided.';
-  const logo = getVal(['company/logos/0/url', 'company/logo', 'logoUrl']);
-  const linkedinUrl = getVal(['linkedinUrl']);
-  const easyApplyUrl = getVal(['applyMethod/easyApplyUrl', 'easyApplyUrl', 'query/easyApply']);
-  const companyApplyUrl = getVal(['applyMethod/companyApplyUrl']);
-  const generalLink = getVal(['applylink', 'link', 'url', 'applyurl']);
-  const location = getVal(['location/linkedinText', 'location/parsed/text', 'location/parsed/city', 'company/locations/0/city']);
-  const workplaceType = getVal(['workplaceType', 'workRemoteAllowed']);
-  const employmentType = getVal(['employmentType', 'query/employmentType/0']);
-  const experienceLevel = getVal(['experienceLevel', 'query/experienceLevel/0']);
-  const hrProfile = getVal(['hiringTeam/0/name', 'hiringTeam/0/linkedinUrl', 'hr', 'contact']);
-  const salaryMin = getVal(['salary/min']);
-  const salaryMax = getVal(['salary/max']);
-  const salaryCurrency = getVal(['salary/currency']) || '';
-  let salaryStr = getVal(['salary/text']);
-  if (!salaryStr && salaryMin && salaryMax) salaryStr = `${salaryCurrency}${salaryMin} - ${salaryCurrency}${salaryMax}`;
+  const id = getValue(['id', 'jobId']) || `${getValue(['company', 'employer']) || 'job'}-${getValue(['title', 'jobtitle', 'role']) || 'role'}`.replace(/\s+/g, '-').toLowerCase();
+  const title = getValue(['title', 'jobtitle', 'role', 'position', 'designation']) || 'Unknown Title';
+  const company = getValue(['company/name', 'company', 'employer', 'org', 'organization']) || 'Unknown Company';
+  const description = getValue(['descriptionText', 'descriptionHtml', 'description', 'jd', 'detail', 'summary']) || 'No description provided.';
+  const logo = getValue(['company/logos/0/url', 'company/logo', 'logoUrl']);
+  const linkedinUrl = getValue(['linkedinUrl', 'linkedin_url']);
+  const easyApplyUrl = getValue(['applyMethod/easyApplyUrl', 'easyApplyUrl', 'query/easyApply']);
+  const companyApplyUrl = getValue(['applyMethod/companyApplyUrl', 'company_url']);
 
-  // Priority to server tracking, fallback to localStorage
-  const applied = serverAppliedJobs.includes(id) || JSON.parse(localStorage.getItem('appliedJobs') || '[]').includes(id);
+  const generalLinkRaw = getValue(['applylink', 'link', 'url', 'applyurl', 'joblink', 'joburl', 'naukriurl', 'application_url']);
+  let generalLink = (generalLinkRaw && (generalLinkRaw.toLowerCase().includes('ambitionbox.com') || generalLinkRaw.toLowerCase().includes('/reviews/'))) ? null : generalLinkRaw;
 
-  return { id, title, company, description, logo, linkedinUrl, easyApplyUrl, companyApplyUrl, generalLink, location, workplaceType, employmentType, experienceLevel, hrProfile, salaryStr, applied };
+  if (!generalLink && description) {
+    const urlRegex = /https?:\/\/[^\s"'<>()[\]]+/g;
+    const links = description.match(urlRegex) || [];
+    generalLink = links.find((link) => !link.toLowerCase().includes('ambitionbox.com') && !link.toLowerCase().includes('/reviews/')) || '';
+  }
+
+  const location = getValue(['location/linkedinText', 'location/parsed/text', 'location/parsed/city', 'company/locations/0/city', 'location', 'city']) || '';
+  const workplaceType = getValue(['workplaceType', 'workRemoteAllowed', 'remote']) || '';
+  const employmentType = getValue(['employmentType', 'query/employmentType/0', 'type']) || '';
+  const experienceLevel = getValue(['experienceLevel', 'query/experienceLevel/0', 'exp', 'experience']) || '';
+  const hrProfile = getValue(['hiringTeam/0/name', 'hr', 'contact', 'hrName', 'recruiter']) || '';
+  const hrEmail = getValue(['email', 'hrEmail', 'recruiterEmail', 'mail', 'contactEmail']) || '';
+  const hrPhone = getValue(['phone', 'contactNumber', 'mobile', 'hrPhone', 'recruiterPhone', 'contactNo']) || '';
+
+  const salaryMin = getValue(['salary/min']);
+  const salaryMax = getValue(['salary/max']);
+  const salaryCurrency = getValue(['salary/currency']) || '';
+  let salaryStr = getValue(['salary/text', 'salary', 'ctc']) || '';
+  if (!salaryStr && salaryMin && salaryMax) {
+    salaryStr = `${salaryCurrency}${salaryMin} - ${salaryCurrency}${salaryMax}`;
+  }
+
+  const appliedMatch = appliedRecords.find((record) => record.id === id);
+
+  return {
+    id,
+    title,
+    company,
+    description,
+    logo,
+    linkedinUrl,
+    easyApplyUrl,
+    companyApplyUrl,
+    generalLink,
+    location,
+    workplaceType,
+    employmentType,
+    experienceLevel,
+    hrProfile,
+    hrEmail,
+    hrPhone,
+    salaryStr,
+    applied: Boolean(appliedMatch),
+    appliedStatus: appliedMatch?.status || ''
+  };
 }
-
-document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderJobs(); }});
-document.getElementById('nextPageBtn').addEventListener('click', () => { 
-  const pendingJobs = jobs.filter(j => !j.applied);
-  if (currentPage * pageSize < pendingJobs.length) { currentPage++; renderJobs(); }
-});
 
 function renderJobs() {
   jobList.innerHTML = '';
-  const pendingJobs = jobs.filter(j => !j.applied);
-  jobCount.innerText = pendingJobs.length;
+
+  const pendingJobs = jobs.filter((job) => !job.applied);
+  jobCount.textContent = pendingJobs.length;
+  heroPendingCount.textContent = pendingJobs.length;
 
   if (pendingJobs.length === 0) {
-    jobList.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 4rem; text-align: center;">No pending jobs found! 🎉</div>';
+    jobList.innerHTML = '<div class="empty-state">No pending jobs right now. Marked items move into Applied Tracker automatically.</div>';
     paginationControls.classList.add('hidden');
+    renderJobDetails();
     return;
   }
-  
+
   const totalPages = Math.ceil(pendingJobs.length / pageSize);
-  if (currentPage > totalPages) currentPage = totalPages;
-  const startIndex = (currentPage - 1) * pageSize;
-  const currentJobs = pendingJobs.slice(startIndex, startIndex + pageSize);
+  currentPage = Math.min(currentPage, totalPages);
+  const visibleJobs = pendingJobs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  if (totalPages > 1) {
-    paginationControls.classList.remove('hidden');
-    document.getElementById('pageInfo').innerText = `Page ${currentPage} of ${totalPages}`;
-    document.getElementById('prevPageBtn').disabled = currentPage === 1;
-    document.getElementById('nextPageBtn').disabled = currentPage === totalPages;
-  } else {
-    paginationControls.classList.add('hidden');
-  }
+  paginationControls.classList.toggle('hidden', totalPages <= 1);
+  document.getElementById('pageInfo').textContent = `${currentPage}/${totalPages}`;
+  document.getElementById('prevPageBtn').disabled = currentPage === 1;
+  document.getElementById('nextPageBtn').disabled = currentPage === totalPages;
 
-  currentJobs.forEach(job => {
-    const card = document.createElement('div');
-    card.className = 'job-card glass-card';
-    
-    let badgesHtml = '';
-    if (job.location) badgesHtml += `<span class="badge"><i data-lucide="map-pin"></i> ${job.location}</span>`;
-    if (job.workplaceType) badgesHtml += `<span class="badge"><i data-lucide="monitor"></i> ${job.workplaceType}</span>`;
-    if (job.employmentType) badgesHtml += `<span class="badge"><i data-lucide="briefcase"></i> ${job.employmentType}</span>`;
-    if (job.experienceLevel) badgesHtml += `<span class="badge"><i data-lucide="trending-up"></i> ${job.experienceLevel}</span>`;
-    if (job.salaryStr) badgesHtml += `<span class="badge highlight-badge"><i data-lucide="banknote"></i> ${job.salaryStr}</span>`;
-    if (job.hrProfile) badgesHtml += `<span class="badge"><i data-lucide="user"></i> HR: ${job.hrProfile}</span>`;
-
-    let linksHtml = '';
-    if (job.easyApplyUrl) linksHtml += `<a href="${job.easyApplyUrl}" target="_blank" class="primary-btn apply-btn" data-id="${job.id}"><i data-lucide="zap"></i> Easy Apply</a>`;
-    if (job.companyApplyUrl) linksHtml += `<a href="${job.companyApplyUrl}" target="_blank" class="secondary-btn apply-btn" data-id="${job.id}"><i data-lucide="external-link"></i> Company Site</a>`;
-    if (job.linkedinUrl) linksHtml += `<a href="${job.linkedinUrl}" target="_blank" class="secondary-btn apply-btn" data-id="${job.id}"><i data-lucide="linkedin"></i> LinkedIn</a>`;
-    if (!linksHtml && job.generalLink) linksHtml += `<a href="${job.generalLink}" target="_blank" class="primary-btn apply-btn" data-id="${job.id}"><i data-lucide="external-link"></i> Apply Now</a>`;
-    if (!linksHtml) linksHtml = `<span class="no-link">No Application Links Found</span>`;
-
+  visibleJobs.forEach((job) => {
+    const card = document.createElement('button');
+    card.className = `compact-job-card ${selectedJob?.id === job.id ? 'active' : ''}`;
+    card.type = 'button';
     card.innerHTML = `
-      <div class="job-card-header">
-        <div class="company-brand">
-          ${job.logo ? `<img src="${job.logo}" alt="Company Logo" class="company-logo" onerror="this.style.display='none'" />` : ''}
-          <div>
-            <h3 class="job-title">${job.title}</h3>
-            <p class="job-company"><i data-lucide="building-2"></i> ${job.company}</p>
-          </div>
+      <div class="company-brand">
+        ${job.logo ? `<img src="${job.logo}" alt="" class="company-logo" onerror="this.style.display='none'" />` : '<i data-lucide="building-2"></i>'}
+        <div class="card-copy">
+          <h3 class="job-title">${truncate(job.title, 48)}</h3>
+          <p class="job-company">${truncate(job.company, 34)}</p>
         </div>
-        <button class="icon-btn toggle-applied-btn" data-id="${job.id}" title="Mark Applied"><i data-lucide="check-square"></i></button>
       </div>
-      ${badgesHtml ? `<div class="job-badges">${badgesHtml}</div>` : ''}
-      <div class="job-card-body">
-        <p class="job-description">${truncate(job.description, 200)}</p>
-      </div>
-      <div class="job-card-actions">
-        <div class="job-links-group">
-          ${linksHtml}
-        </div>
+      <div class="mini-meta">
+        ${job.location ? `<span>${job.location}</span>` : '<span>Location pending</span>'}
+        ${job.salaryStr ? `<strong>${truncate(job.salaryStr, 22)}</strong>` : ''}
       </div>
     `;
+    card.addEventListener('click', () => {
+      selectedJob = job;
+      renderJobs();
+      renderJobDetails();
+    });
     jobList.appendChild(card);
   });
-  
-  createIcons({ icons });
 
-  document.querySelectorAll('.toggle-applied-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const id = e.target.closest('.toggle-applied-btn').dataset.id;
-      markAsApplied(id);
+  createIcons({ icons });
+}
+
+function renderJobDetails() {
+  if (!selectedJob || selectedJob.applied) {
+    jobDetailsEmptyState.classList.remove('hidden');
+    jobDetailsContent.classList.add('hidden');
+    return;
+  }
+
+  jobDetailsEmptyState.classList.add('hidden');
+  jobDetailsContent.classList.remove('hidden');
+
+  const badges = [
+    renderBadge('map-pin', selectedJob.location),
+    renderBadge('monitor', selectedJob.workplaceType),
+    renderBadge('briefcase', selectedJob.employmentType),
+    renderBadge('trending-up', selectedJob.experienceLevel),
+    renderBadge('banknote', selectedJob.salaryStr, true)
+  ].filter(Boolean).join('');
+
+  const actions = [
+    selectedJob.easyApplyUrl ? renderLinkButton(selectedJob.easyApplyUrl, 'Easy Apply', 'zap', 'primary-btn') : '',
+    selectedJob.companyApplyUrl ? renderLinkButton(selectedJob.companyApplyUrl, 'Company Site', 'external-link', 'secondary-btn') : '',
+    selectedJob.linkedinUrl ? renderLinkButton(selectedJob.linkedinUrl, 'LinkedIn', 'linkedin', 'secondary-btn') : '',
+    !selectedJob.easyApplyUrl && !selectedJob.companyApplyUrl && !selectedJob.linkedinUrl && selectedJob.generalLink
+      ? renderLinkButton(selectedJob.generalLink, 'Apply Now', 'external-link', 'primary-btn')
+      : '',
+    !selectedJob.easyApplyUrl && !selectedJob.companyApplyUrl && !selectedJob.linkedinUrl && !selectedJob.generalLink
+      ? renderLinkButton(`https://www.google.com/search?q=${encodeURIComponent(`${selectedJob.company} ${selectedJob.title} career apply`)}`, 'Search Role', 'search', 'secondary-btn')
+      : ''
+  ].filter(Boolean).join('');
+
+  const recruiter = [
+    renderBadge('user', selectedJob.hrProfile ? `HR: ${selectedJob.hrProfile}` : ''),
+    selectedJob.hrEmail ? `<a href="mailto:${selectedJob.hrEmail}" class="badge highlight-badge clickable-badge"><i data-lucide="mail"></i><span>${selectedJob.hrEmail}</span></a>` : '',
+    selectedJob.hrPhone ? `<a href="tel:${selectedJob.hrPhone}" class="badge clickable-badge"><i data-lucide="phone"></i><span>${selectedJob.hrPhone}</span></a>` : ''
+  ].filter(Boolean).join('');
+
+  jobDetailsContent.innerHTML = `
+    <div class="details-header">
+      <div class="details-company-info">
+        ${selectedJob.logo ? `<img src="${selectedJob.logo}" alt="Logo" class="details-logo" onerror="this.style.display='none'" />` : '<div class="details-logo fallback-logo"><i data-lucide="building-2"></i></div>'}
+        <div class="details-title">
+          <p class="eyebrow">Pending role</p>
+          <h1>${selectedJob.title}</h1>
+          <p class="details-company">${selectedJob.company}</p>
+        </div>
+      </div>
+      <button class="primary-btn" id="detailApplyBtn"><i data-lucide="check-check"></i> Mark Applied</button>
+    </div>
+
+    <div class="details-badges">${badges || '<span class="muted-text">No extra metadata in this export.</span>'}</div>
+
+    <div class="details-section">
+      <h3>Application Actions</h3>
+      <div class="details-actions">${actions}</div>
+    </div>
+
+    <div class="details-section">
+      <h3>Description</h3>
+      <div class="details-body">${selectedJob.description}</div>
+    </div>
+
+    ${recruiter ? `<div class="details-section"><h3>Recruiter Details</h3><div class="details-badges">${recruiter}</div></div>` : ''}
+  `;
+
+  document.getElementById('detailApplyBtn').addEventListener('click', () => markAsApplied(selectedJob.id));
+  createIcons({ icons });
+}
+
+function renderAppliedTracker() {
+  const interviews = appliedRecords.filter((record) => record.status === 'Interviewing').length;
+  const offers = appliedRecords.filter((record) => record.status === 'Offer').length;
+  const latestUpdate = appliedRecords[0]?.lastUpdatedAt || appliedRecords[0]?.appliedAt;
+
+  appliedCount.textContent = appliedRecords.length;
+  appliedTotalMetric.textContent = appliedRecords.length;
+  interviewMetric.textContent = interviews;
+  offerMetric.textContent = offers;
+  heroAppliedCount.textContent = appliedRecords.length;
+  appliedUpdatedAt.textContent = latestUpdate ? `Updated ${formatDateTime(latestUpdate)}` : 'No updates yet';
+
+  appliedList.innerHTML = '';
+
+  if (appliedRecords.length === 0) {
+    appliedList.innerHTML = '<div class="empty-state">No applied roles tracked yet. Mark a pending role as applied to move it here.</div>';
+    appliedDetailsEmpty.classList.remove('hidden');
+    appliedDetailsContent.classList.add('hidden');
+    refreshCounts();
+    return;
+  }
+
+  if (!selectedAppliedJob || !appliedRecords.some((record) => record.id === selectedAppliedJob.id)) {
+    selectedAppliedJob = appliedRecords[0];
+  }
+
+  appliedRecords.forEach((record) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = `compact-job-card applied-card ${selectedAppliedJob?.id === record.id ? 'active' : ''}`;
+    card.innerHTML = `
+      <div class="company-brand">
+        ${record.logo ? `<img src="${record.logo}" alt="" class="company-logo" onerror="this.style.display='none'" />` : '<i data-lucide="folder-check"></i>'}
+        <div class="card-copy">
+          <h3 class="job-title">${truncate(record.title, 42)}</h3>
+          <p class="job-company">${truncate(record.company, 28)}</p>
+        </div>
+      </div>
+      <div class="mini-meta">
+        <span>${record.status}</span>
+        <strong>${formatShortDate(record.appliedAt)}</strong>
+      </div>
+    `;
+    card.addEventListener('click', () => {
+      selectedAppliedJob = record;
+      renderAppliedTracker();
     });
+    appliedList.appendChild(card);
   });
+
+  renderAppliedDetails();
+  refreshCounts();
+  createIcons({ icons });
+}
+
+function renderAppliedDetails() {
+  if (!selectedAppliedJob) {
+    appliedDetailsEmpty.classList.remove('hidden');
+    appliedDetailsContent.classList.add('hidden');
+    return;
+  }
+
+  appliedDetailsEmpty.classList.add('hidden');
+  appliedDetailsContent.classList.remove('hidden');
+
+  const links = [
+    selectedAppliedJob.easyApplyUrl ? renderLinkButton(selectedAppliedJob.easyApplyUrl, 'Easy Apply', 'zap', 'primary-btn') : '',
+    selectedAppliedJob.companyApplyUrl ? renderLinkButton(selectedAppliedJob.companyApplyUrl, 'Company Site', 'external-link', 'secondary-btn') : '',
+    selectedAppliedJob.linkedinUrl ? renderLinkButton(selectedAppliedJob.linkedinUrl, 'LinkedIn', 'linkedin', 'secondary-btn') : '',
+    selectedAppliedJob.generalLink ? renderLinkButton(selectedAppliedJob.generalLink, 'Original Link', 'link', 'secondary-btn') : ''
+  ].filter(Boolean).join('');
+
+  appliedDetailsContent.innerHTML = `
+    <div class="details-header">
+      <div class="details-company-info">
+        ${selectedAppliedJob.logo ? `<img src="${selectedAppliedJob.logo}" alt="Logo" class="details-logo" onerror="this.style.display='none'" />` : '<div class="details-logo fallback-logo"><i data-lucide="folder-check"></i></div>'}
+        <div class="details-title">
+          <p class="eyebrow">Applied role</p>
+          <h1>${selectedAppliedJob.title}</h1>
+          <p class="details-company">${selectedAppliedJob.company}</p>
+        </div>
+      </div>
+      <span class="pill">${selectedAppliedJob.status}</span>
+    </div>
+
+    <div class="details-badges">
+      ${renderBadge('calendar-days', `Applied ${formatDateTime(selectedAppliedJob.appliedAt)}`)}
+      ${selectedAppliedJob.location ? renderBadge('map-pin', selectedAppliedJob.location) : ''}
+      ${selectedAppliedJob.salaryStr ? renderBadge('banknote', selectedAppliedJob.salaryStr, true) : ''}
+    </div>
+
+    <div class="details-section">
+      <h3>Pipeline Update</h3>
+      <div class="update-grid">
+        <div class="form-group">
+          <label>Status</label>
+          <select id="appliedStatusSelect" class="input-field">
+            ${APPLIED_STATUSES.map((status) => `<option value="${status}" ${selectedAppliedJob.status === status ? 'selected' : ''}>${status}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea id="appliedNotes" class="input-field textarea" rows="5" placeholder="Add recruiter updates, next steps, interview dates...">${selectedAppliedJob.notes || ''}</textarea>
+        </div>
+      </div>
+      <div class="cta-row">
+        <button class="primary-btn" id="saveAppliedUpdateBtn"><i data-lucide="save"></i> Save Update</button>
+        <span class="muted-text">Last updated ${formatDateTime(selectedAppliedJob.lastUpdatedAt || selectedAppliedJob.appliedAt)}</span>
+      </div>
+    </div>
+
+    ${links ? `<div class="details-section"><h3>Quick Links</h3><div class="details-actions">${links}</div></div>` : ''}
+    <div class="details-section">
+      <h3>Stored Description</h3>
+      <div class="details-body">${selectedAppliedJob.description || 'No description stored.'}</div>
+    </div>
+  `;
+
+  document.getElementById('saveAppliedUpdateBtn').addEventListener('click', async () => {
+    const status = document.getElementById('appliedStatusSelect').value;
+    const notes = document.getElementById('appliedNotes').value.trim();
+    await updateAppliedRecord(selectedAppliedJob.id, { status, notes });
+  });
+
+  createIcons({ icons });
 }
 
 async function markAsApplied(id) {
-  const job = jobs.find(j => j.id === id);
-  if (job) {
-    job.applied = true;
-    
-    // Save to localStorage
-    const local = JSON.parse(localStorage.getItem('appliedJobs') || '[]');
-    if (!local.includes(id)) {
-      local.push(id);
-      localStorage.setItem('appliedJobs', JSON.stringify(local));
+  const job = jobs.find((item) => item.id === id);
+  if (!job) return;
+
+  const record = {
+    ...job,
+    status: 'Applied',
+    notes: '',
+    appliedAt: new Date().toISOString()
+  };
+
+  job.applied = true;
+  appliedRecords = upsertAppliedRecord(record);
+  persistAppliedCache();
+
+  try {
+    const response = await apiFetch('/api/applied-jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job: record })
+    });
+    if (response.ok) {
+      const data = await safeJson(response);
+      appliedRecords = data.records;
+      persistAppliedCache();
     }
-    
-    // Attempt save to server if logged in
-    if (currentUser) {
-      try {
-        await fetch('/api/applied-jobs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jobId: id })
-        });
-      } catch (e) {
-        console.error("Failed to sync applied job to server.");
-      }
-    }
-    
-    renderJobs();
+  } catch (error) {
+    console.warn('Applied job sync failed.', error);
   }
+
+  const pendingJobs = jobs.filter((item) => !item.applied);
+  selectedJob = pendingJobs[0] || null;
+  selectedAppliedJob = appliedRecords[0] || selectedAppliedJob;
+
+  renderJobs();
+  renderJobDetails();
+  renderAppliedTracker();
+  showBanner(`${job.company} moved to Applied Tracker.`, 'success');
 }
 
-function truncate(str, n) { if (!str) return ''; return (str.length > n) ? str.slice(0, n - 1) + '...' : str; }
+async function updateAppliedRecord(id, updates) {
+  appliedRecords = appliedRecords.map((record) => (
+    record.id === id
+      ? { ...record, ...updates, lastUpdatedAt: new Date().toISOString() }
+      : record
+  ));
 
-// --- OUTREACH MANAGER LOGIC ---
+  selectedAppliedJob = appliedRecords.find((record) => record.id === id) || selectedAppliedJob;
+  persistAppliedCache();
+  renderAppliedTracker();
 
-outreachFileInput.addEventListener('change', (e) => {
-  const file = e.target.files[0];
+  try {
+    const response = await apiFetch(`/api/applied-jobs/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+
+    if (response.ok) {
+      const data = await safeJson(response);
+      appliedRecords = appliedRecords.map((record) => record.id === id ? data.record : record);
+      selectedAppliedJob = data.record;
+      persistAppliedCache();
+      renderAppliedTracker();
+    }
+  } catch (error) {
+    console.warn('Applied update sync failed.', error);
+  }
+
+  showBanner('Applied tracker updated.', 'success');
+}
+
+function upsertAppliedRecord(record) {
+  const existingIndex = appliedRecords.findIndex((item) => item.id === record.id);
+  const normalized = {
+    ...record,
+    lastUpdatedAt: new Date().toISOString()
+  };
+
+  if (existingIndex >= 0) {
+    const clone = [...appliedRecords];
+    clone[existingIndex] = { ...clone[existingIndex], ...normalized };
+    return clone;
+  }
+
+  return [normalized, ...appliedRecords];
+}
+
+function handleOutreachUpload(event) {
+  const file = event.target.files[0];
   if (!file) return;
+
   const reader = new FileReader();
-  reader.onload = (ev) => { parseOutreachHTML(ev.target.result); };
+  reader.onload = (loadEvent) => parseOutreachHTML(loadEvent.target.result);
   reader.readAsText(file);
-});
+}
 
 function parseOutreachHTML(htmlString) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlString, 'text/html');
-  outreachContacts = [];
-  outreachVariants = [];
 
-  doc.querySelectorAll('.contact-card').forEach(card => {
-    const nameEl = card.querySelector('.contact-name');
-    const companyEl = card.querySelector('.contact-company');
-    const emailEl = card.querySelector('.contact-email a'); 
-    if (nameEl && emailEl) {
-       outreachContacts.push({ name: nameEl.innerText.trim(), company: companyEl ? companyEl.innerText.trim() : '', email: emailEl.innerText.trim() });
+  outreachContacts = extractContactsFromDocument(doc);
+  outreachVariants = extractTemplatesFromDocument(doc);
+
+  if (outreachVariants.length === 0) {
+    outreachVariants = [{
+      id: 'default-template',
+      subject: 'Application for relevant opportunity',
+      bodyTemplate: 'Hi [Recruiter Name],\n\nI am interested in opportunities at [Company]. Please find my resume attached.\n\nBest regards,'
+    }];
+  }
+
+  if (outreachContacts.length === 0) {
+    setInlineStatus(outreachStatus, 'No recruiter emails were detected in that HTML file.', 'warning');
+    return;
+  }
+
+  outreachEmptyState.classList.add('hidden');
+  outreachList.classList.remove('hidden');
+  document.getElementById('automationConfig').classList.remove('hidden');
+  renderOutreachContacts();
+  setInlineStatus(outreachStatus, `Loaded ${outreachContacts.length} contacts and ${outreachVariants.length} email template(s).`, 'success');
+}
+
+function extractContactsFromDocument(doc) {
+  const contactsMap = new Map();
+
+  doc.querySelectorAll('a[href^="mailto:"]').forEach((anchor) => {
+    const email = anchor.getAttribute('href').replace(/^mailto:/i, '').trim();
+    if (!email) return;
+
+    const card = anchor.closest('.contact-card, .outreach-item, tr, li, div');
+    const surroundingText = card?.textContent?.replace(/\s+/g, ' ').trim() || anchor.textContent.trim();
+    const companyMatch = surroundingText.match(/at\s+([A-Za-z0-9 &.-]+)/i);
+
+    contactsMap.set(email.toLowerCase(), {
+      email,
+      name: anchor.textContent.trim() && !anchor.textContent.includes('@') ? anchor.textContent.trim() : surroundingText.split('|')[0].trim() || 'Recruiter',
+      company: companyMatch?.[1]?.trim() || ''
+    });
+  });
+
+  doc.querySelectorAll('.contact-card').forEach((card) => {
+    const email = card.querySelector('.contact-email a')?.textContent?.trim();
+    if (!email) return;
+
+    contactsMap.set(email.toLowerCase(), {
+      email,
+      name: card.querySelector('.contact-name')?.textContent?.trim() || 'Recruiter',
+      company: card.querySelector('.contact-company')?.textContent?.trim() || ''
+    });
+  });
+
+  return Array.from(contactsMap.values());
+}
+
+function extractTemplatesFromDocument(doc) {
+  const templates = [];
+
+  doc.querySelectorAll('.outreach-card, [data-outreach-template]').forEach((card, index) => {
+    const subject = card.querySelector('.outreach-subject')?.textContent?.replace('Subject:', '').trim() || `Outreach Template ${index + 1}`;
+    const body = card.querySelector('.outreach-text')?.textContent?.trim() || card.getAttribute('data-outreach-template') || '';
+    if (body) {
+      templates.push({ id: `template-${index + 1}`, subject, bodyTemplate: body });
     }
   });
 
-  doc.querySelectorAll('.outreach-card').forEach((card, idx) => {
-    const subjectEl = card.querySelector('.outreach-subject');
-    const textBox = card.querySelector('.outreach-text');
-    let subject = subjectEl ? subjectEl.innerText.replace('Subject:', '').trim() : 'Application for Open Role';
-    let text = textBox ? textBox.innerText.trim() : '';
-    if (text) outreachVariants.push({ id: 'v' + (idx + 1), subject, bodyTemplate: text });
-  });
-
-  if (outreachContacts.length === 0) return alert("No valid HR contacts found in the HTML.");
-
-  outreachEmptyState.classList.add('hidden');
-  document.getElementById('automationConfig').classList.remove('hidden');
-  outreachList.classList.remove('hidden');
-  renderOutreachContacts();
+  return templates;
 }
 
 function renderOutreachContacts() {
   outreachList.innerHTML = '';
-  outreachContacts.forEach((contact, idx) => {
-     const row = document.createElement('div');
-     row.className = 'outreach-item glass-card';
-     row.innerHTML = `
-        <div class="outreach-person">
-          <h4>${contact.name}</h4>
-          <p><i data-lucide="building"></i> ${contact.company}</p>
-          <p style="color: #818cf8;"><i data-lucide="mail"></i> ${contact.email}</p>
-        </div>
-        <button class="secondary-btn btn-sm copy-email-btn" data-email="${contact.email}"><i data-lucide="copy"></i></button>
-     `;
-     outreachList.appendChild(row);
+
+  outreachContacts.forEach((contact) => {
+    const row = document.createElement('div');
+    row.className = 'outreach-item';
+    row.innerHTML = `
+      <div class="outreach-person">
+        <h4>${contact.name || 'Recruiter'}</h4>
+        <p>${contact.company || 'Company not detected'}</p>
+        <p class="accent-copy">${contact.email}</p>
+      </div>
+      <button class="secondary-btn btn-sm copy-email-btn" type="button" data-email="${contact.email}">
+        <i data-lucide="copy"></i> Copy
+      </button>
+    `;
+    outreachList.appendChild(row);
   });
+
+  outreachList.querySelectorAll('.copy-email-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      navigator.clipboard.writeText(button.dataset.email);
+      setInlineStatus(outreachStatus, `${button.dataset.email} copied to clipboard.`, 'info');
+    });
+  });
+
   createIcons({ icons });
-  document.querySelectorAll('.copy-email-btn').forEach(btn => btn.addEventListener('click', (e) => {
-    navigator.clipboard.writeText(e.target.closest('.copy-email-btn').dataset.email);
-    alert('Email copied!');
-  }));
 }
 
-// BULK AUTOMATION
-document.getElementById('fireAllMailsBtn').addEventListener('click', async () => {
-   const email = document.getElementById('gmailAddress').value;
-   const password = document.getElementById('gmailPassword').value;
-   const resume = document.getElementById('resumeUpload').files[0];
-   if (!email || !password || !resume) return alert("Fill Sender Gmail, App Password & Resume PDF first!");
-   
-   const payloadContacts = outreachContacts.map(c => {
-     const v = outreachVariants[0];
-     return {
-       to: c.email,
-       subject: v.subject,
-       body: v.bodyTemplate.replace(/\[Recruiter Name\]/gi, c.name.split(' ')[0]).replace(/\[Company\]/gi, c.company || 'your company')
-     };
-   });
+async function sendBulkOutreach() {
+  const email = document.getElementById('gmailAddress').value.trim();
+  const password = document.getElementById('gmailPassword').value.trim();
+  const resume = document.getElementById('resumeUpload').files[0];
 
-   const fd = new FormData();
-   fd.append('email', email); fd.append('password', password); fd.append('contacts', JSON.stringify(payloadContacts)); fd.append('resume', resume);
+  if (!email || !password || !resume) {
+    setInlineStatus(outreachStatus, 'Add sender Gmail, app password, and a resume PDF first.', 'warning');
+    return;
+  }
 
-   const btn = document.getElementById('fireAllMailsBtn');
-   btn.disabled = true; btn.innerText = "Sending...";
+  const template = outreachVariants[0];
+  const contacts = outreachContacts.map((contact) => ({
+    to: contact.email,
+    subject: template.subject,
+    body: template.bodyTemplate
+      .replace(/\[Recruiter Name\]/gi, firstName(contact.name))
+      .replace(/\[Company\]/gi, contact.company || 'your company')
+  }));
 
-   try {
-     const res = await fetch('/api/send-cold-emails', { method: 'POST', body: fd });
-     const data = await res.json();
-     if (data.success) alert("Bulk outreach complete!"); else alert("Failed: " + data.error);
-   } catch(e) { alert("Backend unreachable."); }
-   finally { btn.disabled = false; btn.innerText = "Fire All Emails Automatically"; }
-});
+  const payload = new FormData();
+  payload.append('email', email);
+  payload.append('password', password);
+  payload.append('contacts', JSON.stringify(contacts));
+  payload.append('resume', resume);
 
-// MANUAL SINGLE EMAIL
-document.getElementById('sendManualBtn').addEventListener('click', async () => {
-    const fromEmail = document.getElementById('manualFromEmail').value;
-    const fromPass = document.getElementById('manualFromPass').value;
-    const to = document.getElementById('manualToEmail').value;
-    const subject = document.getElementById('manualSubject').value;
-    const body = document.getElementById('manualBody').value;
-    const files = document.getElementById('manualAttachments').files;
+  const button = document.getElementById('fireAllMailsBtn');
+  button.disabled = true;
+  button.textContent = 'Sending...';
+  setInlineStatus(outreachStatus, `Sending ${contacts.length} outreach emails...`, 'info');
 
-    if(!fromEmail || !fromPass || !to || !subject || !body) return alert("Please fill all manual email fields.");
+  try {
+    const response = await apiFetch('/api/send-cold-emails', {
+      method: 'POST',
+      body: payload
+    });
+    const data = await safeJson(response);
 
-    const fd = new FormData();
-    fd.append('fromEmail', fromEmail);
-    fd.append('fromPass', fromPass);
-    fd.append('to', to);
-    fd.append('subject', subject);
-    fd.append('body', body);
-    for(let f of files) fd.append('attachments', f);
+    if (!data.success) throw new Error(data.error || 'Bulk send failed.');
 
-    const btn = document.getElementById('sendManualBtn');
-    btn.disabled = true; btn.innerText = "Sending...";
-
-    try {
-        const res = await fetch('/api/send-single-email', { method: 'POST', body: fd });
-        const data = await res.json();
-        if(data.success) alert("Manual email sent!"); else alert("Error: " + data.error);
-    } catch(e) { alert("Backend unreachable."); }
-    finally { btn.disabled = false; btn.innerText = "Send Email"; }
-});
-
-// URL SCRAPER
-document.getElementById('scrapeBtn').addEventListener('click', async () => {
-    const url = document.getElementById('scrapeUrl').value;
-    if(!url) return alert("Enter a URL first.");
-    const btn = document.getElementById('scrapeBtn');
-    btn.disabled = true; btn.innerText = "Scraping...";
-
-    try {
-        const res = await fetch('/api/scrape-emails', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-        const data = await res.json();
-        if(data.success && data.emails.length > 0) {
-            document.getElementById('scrapeResults').classList.remove('hidden');
-            const list = document.getElementById('scrapedEmailsList');
-            list.innerHTML = data.emails.map(e => `<li>${e} <button class="primary-btn btn-sm" onclick="document.getElementById('manualToEmail').value='${e}'; document.getElementById('outreachSection').scrollIntoView();">Use</button></li>`).join('');
-        } else {
-            alert("No emails found on that page.");
-        }
-    } catch(e) { alert("Scraper failed. Site might be blocking crawlers."); }
-    finally { btn.disabled = false; btn.innerText = "Scrape"; }
-});
-
-
-// WALK IN SCANNER
-document.getElementById('scanWalkinsBtn').addEventListener('click', async () => {
-    const role = document.getElementById('walkInRole').value;
-    const loc = document.getElementById('walkInLocation').value;
-    const list = document.getElementById('walkInList');
-    list.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;"><i data-lucide="loader"></i> Scanning job networks...</div>`;
+    const successCount = data.results.filter((item) => item.status === 'Sent').length;
+    const failureCount = data.results.length - successCount;
+    setInlineStatus(outreachStatus, `Bulk outreach finished. Sent: ${successCount}, failed: ${failureCount}.`, failureCount ? 'warning' : 'success');
+  } catch (error) {
+    setInlineStatus(outreachStatus, error.message || 'Bulk outreach failed.', 'error');
+  } finally {
+    button.disabled = false;
+    button.innerHTML = '<i data-lucide="zap"></i> Send Bulk Outreach';
     createIcons({ icons });
+  }
+}
 
-    try {
-      const res = await fetch(`/api/walkins?role=${encodeURIComponent(role)}&location=${encodeURIComponent(loc)}`);
-      const data = await res.json();
-      list.innerHTML = '';
-      if(data.walkins && data.walkins.length > 0) {
-        data.walkins.forEach(w => {
-           const card = document.createElement('div');
-           card.className = 'job-card glass-card';
-           card.innerHTML = `
-             <div class="job-card-header">
-               <div>
-                 <h3 class="job-title"><i data-lucide="calendar"></i> ${w.date}</h3>
-                 <p class="job-company">${w.company} - ${w.role}</p>
-               </div>
-             </div>
-             <div class="job-badges">
-                <span class="badge highlight-badge"><i data-lucide="map-pin"></i> ${w.location}</span>
-                <span class="badge"><i data-lucide="clock"></i> ${w.time}</span>
-             </div>
-             <div class="job-card-body" style="margin-top: 1rem;">
-               <p style="font-size: 0.875rem; color: #e2e8f0; margin-bottom: 0.5rem;"><strong>Address:</strong> ${w.address}</p>
-               <p class="job-description">${w.description}</p>
-             </div>
-             <div class="job-card-actions">
-               <a href="${w.verifyUrl}" target="_blank" class="secondary-btn w-full"><i data-lucide="external-link"></i> Verify on Naukri/LinkedIn</a>
-             </div>
-           `;
-           list.appendChild(card);
-        });
-        createIcons({ icons });
-      } else {
-        list.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">No walk-ins found today.</div>`;
-      }
-    } catch(e) {
-        list.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">Backend unreachable. Run 'node server.js'.</div>`;
+async function sendManualEmail() {
+  const fromEmail = document.getElementById('manualFromEmail').value.trim();
+  const fromPass = document.getElementById('manualFromPass').value.trim();
+  const to = document.getElementById('manualToEmail').value.trim();
+  const subject = document.getElementById('manualSubject').value.trim();
+  const body = document.getElementById('manualBody').value.trim();
+  const files = document.getElementById('manualAttachments').files;
+
+  if (!fromEmail || !fromPass || !to || !subject || !body) {
+    setInlineStatus(manualStatus, 'Fill every manual email field before sending.', 'warning');
+    return;
+  }
+
+  const payload = new FormData();
+  payload.append('fromEmail', fromEmail);
+  payload.append('fromPass', fromPass);
+  payload.append('to', to);
+  payload.append('subject', subject);
+  payload.append('body', body);
+  Array.from(files).forEach((file) => payload.append('attachments', file));
+
+  const button = document.getElementById('sendManualBtn');
+  button.disabled = true;
+  button.textContent = 'Sending...';
+
+  try {
+    const response = await apiFetch('/api/send-single-email', {
+      method: 'POST',
+      body: payload
+    });
+    const data = await safeJson(response);
+    if (!data.success) throw new Error(data.error || 'Manual send failed.');
+    setInlineStatus(manualStatus, `Email sent successfully to ${to}.`, 'success');
+  } catch (error) {
+    setInlineStatus(manualStatus, error.message || 'Manual email failed.', 'error');
+  } finally {
+    button.disabled = false;
+    button.innerHTML = '<i data-lucide="send"></i> Send Email';
+    createIcons({ icons });
+  }
+}
+
+async function scrapeEmailsFromUrl() {
+  const url = document.getElementById('scrapeUrl').value.trim();
+  if (!url) {
+    setInlineStatus(scrapeStatus, 'Enter a URL first.', 'warning');
+    return;
+  }
+
+  const button = document.getElementById('scrapeBtn');
+  button.disabled = true;
+  button.textContent = 'Scraping...';
+
+  try {
+    const response = await apiFetch('/api/scrape-emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const data = await safeJson(response);
+    if (!data.success) throw new Error(data.error || 'Scrape failed.');
+
+    const list = document.getElementById('scrapedEmailsList');
+    list.innerHTML = '';
+
+    if (!data.emails.length) {
+      setInlineStatus(scrapeStatus, 'No email IDs were found on that page.', 'warning');
+      document.getElementById('scrapeResults').classList.add('hidden');
+      return;
     }
-});
+
+    data.emails.forEach((email) => {
+      const item = document.createElement('li');
+      item.innerHTML = `<span>${email}</span><button class="secondary-btn btn-sm" type="button">Use</button>`;
+      item.querySelector('button').addEventListener('click', () => {
+        document.getElementById('manualToEmail').value = email;
+        setInlineStatus(manualStatus, `${email} copied into the manual receiver field.`, 'info');
+      });
+      list.appendChild(item);
+    });
+
+    document.getElementById('scrapeResults').classList.remove('hidden');
+    setInlineStatus(scrapeStatus, `Found ${data.emails.length} email ID(s).`, 'success');
+  } catch (error) {
+    setInlineStatus(scrapeStatus, error.message || 'Scraper failed.', 'error');
+  } finally {
+    button.disabled = false;
+    button.innerHTML = '<i data-lucide="search"></i> Scrape';
+    createIcons({ icons });
+  }
+}
+
+async function scanWalkins() {
+  const role = document.getElementById('walkInRole').value.trim() || 'Java Backend';
+  const location = document.getElementById('walkInLocation').value.trim() || 'Bangalore';
+
+  walkInList.innerHTML = '<div class="empty-state"><i data-lucide="loader-circle"></i> Scanning live job sources...</div>';
+  setInlineStatus(walkInMeta, `Searching live links for ${role} in ${location}...`, 'info');
+  createIcons({ icons });
+
+  try {
+    const response = await apiFetch(`/api/walkins?role=${encodeURIComponent(role)}&location=${encodeURIComponent(location)}`);
+    const data = await safeJson(response);
+
+    if (!response.ok) throw new Error(data.error || 'Walk-in scan failed.');
+
+    walkInList.innerHTML = '';
+
+    if (!data.walkins.length) {
+      walkInList.innerHTML = '<div class="empty-state">No live indexed walk-in postings were found for this role and location right now.</div>';
+      setInlineStatus(walkInMeta, `Checked ${formatDateTime(data.generatedAt)}. No real walk-in links were found yet.`, 'warning');
+      return;
+    }
+
+    data.walkins.forEach((item) => {
+      const card = document.createElement('article');
+      card.className = 'walkin-card glass-card';
+      card.innerHTML = `
+        <div class="walkin-header">
+          <div>
+            <p class="eyebrow">Live source</p>
+            <h3>${item.title}</h3>
+          </div>
+          <span class="pill">${item.source}</span>
+        </div>
+        <div class="details-badges">
+          ${renderBadge('map-pin', item.location)}
+          ${renderBadge('calendar-days', item.dateLabel)}
+        </div>
+        <p class="walkin-copy">${item.description || item.snippet || 'Live listing link found from current search results.'}</p>
+        <a href="${item.verifyUrl}" target="_blank" rel="noopener noreferrer" class="primary-btn w-full"><i data-lucide="external-link"></i> Open Real Link</a>
+      `;
+      walkInList.appendChild(card);
+    });
+
+    setInlineStatus(walkInMeta, `Updated ${formatDateTime(data.generatedAt)} with ${data.walkins.length} live result(s).`, 'success');
+    createIcons({ icons });
+  } catch (error) {
+    walkInList.innerHTML = '<div class="empty-state">Live scan failed. Check the backend server and internet access for the API.</div>';
+    setInlineStatus(walkInMeta, error.message || 'Walk-in scan failed.', 'error');
+  }
+}
+
+function renderBadge(icon, text, highlighted = false) {
+  if (!text) return '';
+  return `<span class="badge ${highlighted ? 'highlight-badge' : ''}"><i data-lucide="${icon}"></i><span>${text}</span></span>`;
+}
+
+function renderLinkButton(url, label, icon, className) {
+  return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${className}"><i data-lucide="${icon}"></i>${label}</a>`;
+}
+
+function truncate(value, length) {
+  if (!value) return '';
+  return value.length > length ? `${value.slice(0, length - 1)}...` : value;
+}
+
+function firstName(name) {
+  return (name || 'Recruiter').trim().split(/\s+/)[0];
+}
+
+function formatShortDate(value) {
+  if (!value) return 'Today';
+  return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+function formatDateTime(value) {
+  if (!value) return 'just now';
+  return new Date(value).toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}

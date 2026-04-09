@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "api": "node server.js",
     "dev": "vite",
+    "dev:full": "node scripts/dev-full.js",
     "build": "vite build",
     "preview": "vite preview"
   },

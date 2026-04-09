@@ -4,172 +4,281 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Job Applicator V4 - Ultimate</title>
-    <!-- Google Fonts for Modern Feel -->
+    <title>Job Applicator Suite</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   </head>
-  <body class="dark-mode">
+  <body class="theme-dark">
     <div id="app">
       <header class="navbar">
-        <div class="logo">
-          <i data-lucide="briefcase"></i> AI Job Applicator Suite
+        <div>
+          <p class="eyebrow">Career command center</p>
+          <div class="logo">
+            <i data-lucide="briefcase-business"></i>
+            <span>AI Job Applicator Suite</span>
+          </div>
         </div>
+
         <div class="actions">
           <div id="userProfile" class="user-profile hidden">
             <span id="userName">User</span>
             <a href="/auth/logout" class="icon-btn" title="Logout"><i data-lucide="log-out"></i></a>
           </div>
           <a href="/auth/google" id="loginBtn" class="primary-btn"><i data-lucide="log-in"></i> Login with Google</a>
-          <button id="themeToggle" class="icon-btn">
-            <i data-lucide="sun"></i>
+          <button id="themeToggle" class="icon-btn" title="Toggle theme">
+            <i data-lucide="sun-medium"></i>
           </button>
         </div>
       </header>
 
       <main class="container">
-        <!-- Tabs always visible -->
+        <section class="hero glass-card">
+          <div>
+            <p class="eyebrow">Track applications, outreach, and walk-ins</p>
+            <h1>Keep every opportunity in one place.</h1>
+            <p class="hero-copy">Upload exports, move applied roles into history, reach recruiters, and scan live walk-in links from the same workspace.</p>
+          </div>
+          <div class="hero-stats">
+            <div class="stat-card">
+              <span class="stat-label">Pending jobs</span>
+              <strong id="heroPendingCount">0</strong>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Applied tracked</span>
+              <strong id="heroAppliedCount">0</strong>
+            </div>
+          </div>
+        </section>
+
+        <div id="appStatus" class="status-banner hidden"></div>
+
         <div class="tabs" id="mainTabs">
-          <button class="tab-btn active" data-target="jobsTabContent">💼 Jobs Dashboard</button>
-          <button class="tab-btn" data-target="outreachSection">✉️ Cold Outreach Automator</button>
-          <button class="tab-btn" data-target="walkInSection">🎯 Walk-In Scanner</button>
+          <button class="tab-btn active" data-target="jobsTabContent">Jobs Dashboard</button>
+          <button class="tab-btn" data-target="appliedSection">Applied Tracker</button>
+          <button class="tab-btn" data-target="outreachSection">Cold Outreach</button>
+          <button class="tab-btn" data-target="walkInSection">Walk-In Scanner</button>
         </div>
 
-        <!-- JOBS TAB CONTAINER -->
-        <div id="jobsTabContent">
+        <section id="jobsTabContent" class="tab-panel">
           <section id="uploadSection" class="upload-zone glass-card">
             <div class="upload-content">
               <i data-lucide="upload-cloud" class="upload-icon"></i>
-              <h2>Upload your Job Export</h2>
-              <p>Drag and drop your Naukri or LinkedIn CSV/Excel file here</p>
+              <h2>Upload your jobs export</h2>
+              <p>Import LinkedIn or Naukri CSV/XLSX data and start tracking your pipeline.</p>
               <input type="file" id="fileInput" hidden />
-              <button class="primary-btn" onclick="document.getElementById('fileInput').click()">Select File</button>
+              <div class="cta-row">
+                <button class="primary-btn" onclick="document.getElementById('fileInput').click()">Select File</button>
+                <span class="muted-text">Supported: `.csv`, `.xls`, `.xlsx`</span>
+              </div>
             </div>
           </section>
 
           <section id="dashboardSection" class="dashboard hidden">
-            <div class="dashboard-header">
-              <h2>Pending Applications (<span id="jobCount">0</span>)</h2>
-              <div class="filter-actions">
-                <button class="secondary-btn" id="resetBtn">Upload Another</button>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Pending applications</p>
+                <h2>Application Queue</h2>
+              </div>
+              <div class="toolbar">
+                <span class="pill">Pending <strong id="jobCount">0</strong></span>
+                <button class="secondary-btn btn-sm" id="resetBtn">Reset Upload</button>
               </div>
             </div>
-            <div id="jobList" class="job-list"></div>
-            <div id="paginationControls" class="pagination hidden">
-               <button id="prevPageBtn" class="secondary-btn"><i data-lucide="chevron-left"></i> Prev</button>
-               <span id="pageInfo">Page 1</span>
-               <button id="nextPageBtn" class="secondary-btn">Next <i data-lucide="chevron-right"></i></button>
+
+            <div class="split-layout">
+              <aside class="job-sidebar">
+                <div id="jobList" class="compact-job-list"></div>
+                <div id="paginationControls" class="pagination-mini hidden">
+                  <button id="prevPageBtn" class="icon-btn"><i data-lucide="chevron-left"></i></button>
+                  <span id="pageInfo">1/1</span>
+                  <button id="nextPageBtn" class="icon-btn"><i data-lucide="chevron-right"></i></button>
+                </div>
+              </aside>
+
+              <section class="job-details-pane glass-card">
+                <div id="detailsEmptyState" class="details-empty">
+                  <i data-lucide="mouse-pointer-2"></i>
+                  <p>Select a job to inspect the role, links, and recruiter details.</p>
+                </div>
+                <div id="detailsContent" class="details-content hidden"></div>
+              </section>
             </div>
           </section>
-        </div>
+        </section>
 
-        <!-- OUTREACH SECTION CONTAINER -->
-        <section id="outreachSection" class="dashboard hidden">
-          <div class="dashboard-header">
-            <h2>Cold Email Outreach Manager</h2>
+        <section id="appliedSection" class="tab-panel dashboard hidden">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Persistent history</p>
+              <h2>Applied Tracker</h2>
+            </div>
+            <div class="toolbar">
+              <span class="pill">Tracked <strong id="appliedCount">0</strong></span>
+              <span class="pill" id="appliedUpdatedAt">Updated just now</span>
+            </div>
           </div>
-          
+
+          <div class="stats-grid">
+            <div class="glass-card metric-card">
+              <span class="stat-label">Total applied</span>
+              <strong id="appliedTotalMetric">0</strong>
+            </div>
+            <div class="glass-card metric-card">
+              <span class="stat-label">Interviewing</span>
+              <strong id="interviewMetric">0</strong>
+            </div>
+            <div class="glass-card metric-card">
+              <span class="stat-label">Offers</span>
+              <strong id="offerMetric">0</strong>
+            </div>
+          </div>
+
+          <div class="split-layout applied-layout">
+            <aside class="job-sidebar">
+              <div id="appliedList" class="compact-job-list"></div>
+            </aside>
+
+            <section class="job-details-pane glass-card">
+              <div id="appliedDetailsEmpty" class="details-empty">
+                <i data-lucide="folder-check"></i>
+                <p>Applied roles will appear here with status and notes.</p>
+              </div>
+              <div id="appliedDetailsContent" class="details-content hidden"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="outreachSection" class="tab-panel dashboard hidden">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Recruiter outreach</p>
+              <h2>Cold Email Outreach Manager</h2>
+            </div>
+          </div>
+
           <div class="outreach-grid">
-            <!-- Left Column: Bulk / Scrape -->
             <div class="outreach-main">
               <div class="glass-card outreach-panel">
-                <h3>Bulk Outreach Automator</h3>
-                <div class="panel-actions">
-                  <input type="file" id="outreachFileInput" accept=".html" hidden />
-                  <button class="secondary-btn" onclick="document.getElementById('outreachFileInput').click()"><i data-lucide="file-plus"></i> Load HR HTML List</button>
+                <div class="panel-header">
+                  <div>
+                    <h3>Bulk Outreach Automator</h3>
+                    <p class="muted-text">Load recruiter HTML, preview extracted contacts, then send in bulk.</p>
+                  </div>
+                  <div class="panel-actions">
+                    <input type="file" id="outreachFileInput" accept=".html" hidden />
+                    <button class="secondary-btn" onclick="document.getElementById('outreachFileInput').click()"><i data-lucide="file-plus"></i> Load HR HTML</button>
+                  </div>
                 </div>
-                
+
+                <div id="outreachStatus" class="inline-status hidden"></div>
+
                 <div id="automationConfig" class="automation-form hidden">
-                    <div class="form-group grid-2">
-                        <div>
-                            <label>Sender Gmail</label>
-                            <input type="email" id="gmailAddress" class="input-field" placeholder="you@gmail.com" />
-                        </div>
-                        <div>
-                            <label>Gmail App Password</label>
-                            <input type="password" id="gmailPassword" class="input-field" placeholder="16-letter App Password" />
-                        </div>
+                  <div class="form-group grid-2">
+                    <div>
+                      <label>Sender Gmail</label>
+                      <input type="email" id="gmailAddress" class="input-field" placeholder="you@gmail.com" />
                     </div>
-                    <div class="form-group">
-                        <label>Resume (PDF)</label>
-                        <input type="file" id="resumeUpload" class="file-styled" />
+                    <div>
+                      <label>Gmail App Password</label>
+                      <input type="password" id="gmailPassword" class="input-field" placeholder="16-letter app password" />
                     </div>
-                    <button class="primary-btn w-full" id="fireAllMailsBtn"><i data-lucide="zap"></i> Fire All Emails Automatically</button>
+                  </div>
+                  <div class="form-group">
+                    <label>Resume (PDF)</label>
+                    <input type="file" id="resumeUpload" class="file-styled" accept=".pdf" />
+                  </div>
+                  <button class="primary-btn w-full" id="fireAllMailsBtn"><i data-lucide="zap"></i> Send Bulk Outreach</button>
                 </div>
-                
+
                 <div id="outreachEmptyState" class="empty-state">
-                   Load an HR HTML list or use the single emailer on the right.
+                  Load an HR export to preview contacts and mailing templates.
                 </div>
                 <div id="outreachList" class="outreach-list hidden"></div>
               </div>
 
-              <!-- Web Scraper -->
-              <div class="glass-card outreach-panel mt-2">
-                <h3>URL Email Scraper</h3>
+              <div class="glass-card outreach-panel">
+                <div class="panel-header">
+                  <div>
+                    <h3>URL Email Scraper</h3>
+                    <p class="muted-text">Fetch public email IDs from a careers or team page.</p>
+                  </div>
+                </div>
+
                 <div class="form-group flex-row">
-                  <input type="url" id="scrapeUrl" class="input-field" placeholder="Paste URL (e.g. Company Careers Page)" />
+                  <input type="url" id="scrapeUrl" class="input-field" placeholder="Paste a company careers/team URL" />
                   <button class="primary-btn" id="scrapeBtn"><i data-lucide="search"></i> Scrape</button>
                 </div>
+                <div id="scrapeStatus" class="inline-status hidden"></div>
                 <div id="scrapeResults" class="scrape-results hidden">
-                   <ul id="scrapedEmailsList"></ul>
+                  <ul id="scrapedEmailsList"></ul>
                 </div>
               </div>
             </div>
 
-            <!-- Right Column: Manual Single Email -->
-            <div class="outreach-sidebar">
+            <aside class="outreach-sidebar">
               <div class="glass-card outreach-panel">
-                <h3>Manual Single Email</h3>
+                <div class="panel-header">
+                  <div>
+                    <h3>Manual Single Email</h3>
+                    <p class="muted-text">Use this when you want full control over one message.</p>
+                  </div>
+                </div>
+
                 <div class="manual-form">
-                    <div class="form-group">
-                        <label>Sender Email</label>
-                        <input type="email" id="manualFromEmail" class="input-field" placeholder="Your Gmail" />
-                    </div>
-                    <div class="form-group">
-                        <label>App Password</label>
-                        <input type="password" id="manualFromPass" class="input-field" placeholder="App Password" />
-                    </div>
-                    <div class="form-group">
-                        <label>Receiver Email</label>
-                        <input type="email" id="manualToEmail" class="input-field" placeholder="HR Email" />
-                    </div>
-                    <div class="form-group">
-                        <label>Subject</label>
-                        <input type="text" id="manualSubject" class="input-field" placeholder="Job Application" />
-                    </div>
-                    <div class="form-group">
-                        <label>Body</label>
-                        <textarea id="manualBody" class="input-field textarea" rows="6" placeholder="Write your cover letter..."></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label>Attachments</label>
-                        <input type="file" id="manualAttachments" multiple class="file-styled" />
-                    </div>
-                    <button class="primary-btn w-full" id="sendManualBtn"><i data-lucide="send"></i> Send Email</button>
+                  <div class="form-group">
+                    <label>Sender Email</label>
+                    <input type="email" id="manualFromEmail" class="input-field" placeholder="Your Gmail" />
+                  </div>
+                  <div class="form-group">
+                    <label>App Password</label>
+                    <input type="password" id="manualFromPass" class="input-field" placeholder="App password" />
+                  </div>
+                  <div class="form-group">
+                    <label>Receiver Email</label>
+                    <input type="email" id="manualToEmail" class="input-field" placeholder="Recruiter email" />
+                  </div>
+                  <div class="form-group">
+                    <label>Subject</label>
+                    <input type="text" id="manualSubject" class="input-field" placeholder="Application for ..." />
+                  </div>
+                  <div class="form-group">
+                    <label>Body</label>
+                    <textarea id="manualBody" class="input-field textarea" rows="7" placeholder="Write your outreach message..."></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label>Attachments</label>
+                    <input type="file" id="manualAttachments" multiple class="file-styled" />
+                  </div>
+                  <button class="primary-btn w-full" id="sendManualBtn"><i data-lucide="send"></i> Send Email</button>
+                  <div id="manualStatus" class="inline-status hidden"></div>
                 </div>
               </div>
-            </div>
+            </aside>
           </div>
         </section>
 
-        <!-- WALK IN SCANNER SECTION -->
-        <section id="walkInSection" class="dashboard hidden">
-          <div class="dashboard-header">
-            <h2>Daily Walk-In Scanner</h2>
-            <div class="filter-actions" style="display:flex; gap:1rem;">
-              <input type="text" id="walkInRole" class="input-field" value="Java Backend" placeholder="Role (e.g. Backend)" style="padding: 0.5rem; border-radius: 0.5rem; background: var(--surface); color: white; border: 1px solid var(--surface-border);" />
-              <input type="text" id="walkInLocation" class="input-field" value="Bangalore" placeholder="Location" style="padding: 0.5rem; border-radius: 0.5rem; background: var(--surface); color: white; border: 1px solid var(--surface-border);" />
-              <button class="primary-btn" id="scanWalkinsBtn"><i data-lucide="search"></i> Scan Locally</button>
+        <section id="walkInSection" class="tab-panel dashboard hidden">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Live daily search</p>
+              <h2>Walk-In Scanner</h2>
+            </div>
+            <div class="toolbar toolbar-wrap">
+              <input type="text" id="walkInRole" class="input-field compact-input" value="Java Backend" placeholder="Role" />
+              <input type="text" id="walkInLocation" class="input-field compact-input" value="Bangalore" placeholder="Location" />
+              <button class="primary-btn" id="scanWalkinsBtn"><i data-lucide="radar"></i> Scan Live Sources</button>
             </div>
           </div>
-          <div id="walkInList" class="job-list">
-             <div class="empty-state" style="grid-column: 1 / -1;">Hit Scan to find today's walk-ins with verified links!</div>
+
+          <div id="walkInMeta" class="inline-status hidden"></div>
+          <div id="walkInList" class="walkin-grid">
+            <div class="empty-state">Run a live scan to fetch current walk-in links from public job sites.</div>
           </div>
         </section>
-
       </main>
     </div>
+
     <script type="module" src="/main.js"></script>
   </body>
 </html>

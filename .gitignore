@@ -4,3 +4,6 @@ uploads
 dist
 .DS_Store
 *.local
+.data
+*.log
+debug_*.csv
