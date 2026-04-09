@@ -150,6 +150,27 @@ select {
   border-radius: 1.6rem;
 }
 
+.auth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.2rem 1.3rem;
+  border-radius: 1.35rem;
+}
+
+.auth-panel h2 {
+  margin: 0;
+}
+
+.auth-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1fr) auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-width: min(100%, 720px);
+}
+
 .hero h1 {
   margin: 0;
   font-size: clamp(2rem, 3.5vw, 3rem);
@@ -743,7 +764,8 @@ select {
 @media (max-width: 1100px) {
   .hero,
   .split-layout,
-  .outreach-grid {
+  .outreach-grid,
+  .auth-panel {
     flex-direction: column;
   }
 
@@ -775,13 +797,15 @@ select {
   .outreach-item,
   .scrape-results li,
   .details-header,
-  .details-company-info {
+  .details-company-info,
+  .sender-panel {
     flex-direction: column;
     align-items: stretch;
   }
 
   .grid-2,
-  .update-grid {
+  .update-grid,
+  .auth-grid {
     grid-template-columns: 1fr;
   }
 
