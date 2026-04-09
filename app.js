@@ -133,7 +133,7 @@ function extractEmailAddress(value) {
 
 function resolveReplyTo(req) {
   const userEmail = req.user?.email || req.user?.emails?.[0]?.value || '';
-  const requestedEmail = (req.body?.senderEmail || req.body?.replyTo || '').toString().trim();
+  const requestedEmail = (req.body?.senderEmail || req.body?.replyTo || req.body?.gmailUser || '').toString().trim();
   return extractEmailAddress(userEmail || requestedEmail);
 }
 
@@ -346,8 +346,29 @@ function createAuthenticatedGmailTransport(req) {
   };
 }
 
+function createRequestGmailAppPasswordTransport(req) {
+  const gmailUser = (req.body?.gmailUser || req.query?.gmailUser || '').toString().trim();
+  const gmailAppPassword = (req.body?.gmailAppPassword || req.query?.gmailAppPassword || '').toString().replace(/\s/g, '');
+
+  if (!gmailUser || !gmailAppPassword) return null;
+
+  return {
+    senderEmail: gmailUser,
+    transporter: nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: gmailUser,
+        pass: gmailAppPassword
+      }
+    })
+  };
+}
+
 function createMailTransport(req) {
-  return createServerMailTransport() || createResendMailTransport() || createAuthenticatedGmailTransport(req);
+  return createRequestGmailAppPasswordTransport(req)
+    || createServerMailTransport()
+    || createResendMailTransport()
+    || createAuthenticatedGmailTransport(req);
 }
 
 function buildOAuthUser(existingUser, profile, accessToken, refreshToken) {
@@ -385,21 +406,21 @@ function normalizeMailerError(error) {
   }
 
   if (normalized.includes('sign in with google first')) {
-    return rawMessage;
+    return 'Sign in with Google or provide your Gmail App Password before sending mail.';
   }
 
   if (error?.code === 'EAUTH' || normalized.includes('535-5.7.8') || normalized.includes('badcredentials')) {
     if (hasServerSender) {
       return 'Server mail sender login failed. Check SMTP credentials on the server and use an app password if this is Gmail.';
     }
-    return 'Google rejected mail access for this session. Log out, sign in again with Google, and approve Gmail send access.';
+    return 'Gmail login failed. Re-check the Gmail address and 16-character App Password, or reconnect Google sender.';
   }
 
   if (normalized.includes('invalid login')) {
     if (hasServerSender) {
       return 'Server mail sender rejected the configured login. Update SMTP credentials on the server.';
     }
-    return 'Google mail login failed. Log out, sign in again with Google, and approve Gmail send access for this account.';
+    return 'Gmail login failed. Make sure you are using a 16-character Google App Password, not your normal Gmail password.';
   }
 
   if (normalized.includes('daily user sending quota exceeded')) {

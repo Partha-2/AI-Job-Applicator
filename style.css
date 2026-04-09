@@ -573,6 +573,13 @@ select {
   background: var(--surface-soft);
 }
 
+.sender-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
 .saved-draft {
   margin-top: 0.45rem;
   padding: 0.75rem 0.9rem;
@@ -722,6 +729,56 @@ select {
   width: 100%;
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(8, 15, 31, 0.72);
+}
+
+.modal-card {
+  width: min(100%, 560px);
+  border-radius: 1.35rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+
+.modal-header,
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.2rem;
+}
+
+.modal-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-footer {
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.modal-body {
+  padding: 1.1rem 1.2rem 1.2rem;
+}
+
+.modal-close-btn {
+  flex-shrink: 0;
+}
+
 .empty-state {
   padding: 1.2rem;
   border-radius: 1rem;
@@ -798,7 +855,8 @@ select {
   .scrape-results li,
   .details-header,
   .details-company-info,
-  .sender-panel {
+  .sender-panel,
+  .sender-actions {
     flex-direction: column;
     align-items: stretch;
   }
