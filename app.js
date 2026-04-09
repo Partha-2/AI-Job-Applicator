@@ -131,6 +131,12 @@ function extractEmailAddress(value) {
   return (match?.[1] || value).trim();
 }
 
+function resolveReplyTo(req) {
+  const userEmail = req.user?.email || req.user?.emails?.[0]?.value || '';
+  const requestedEmail = (req.body?.senderEmail || req.body?.replyTo || '').toString().trim();
+  return extractEmailAddress(userEmail || requestedEmail);
+}
+
 function getResendConfig() {
   const apiKey = process.env.RESEND_API_KEY || process.env.RESEND_KEY || '';
   if (!apiKey) return null;
@@ -252,6 +258,7 @@ function createResendMailTransport() {
           subject: message.subject,
           html: message.html || textToHtml(message.text || ''),
           text: message.text || '',
+          reply_to: message.replyTo || undefined,
           attachments: message.attachments?.length ? buildResendAttachments(message.attachments) : undefined
         };
 
@@ -809,6 +816,7 @@ export function createApp() {
       const { contacts } = req.body;
       const parsedContacts = JSON.parse(contacts || '[]');
       const { senderEmail, transporter } = createMailTransport(req);
+      const replyTo = resolveReplyTo(req);
 
       if (parsedContacts.length === 0) {
         return res.status(400).json({ success: false, error: 'Missing required fields.' });
@@ -822,6 +830,7 @@ export function createApp() {
             to: contact.to,
             subject: contact.subject,
             text: contact.body,
+            replyTo,
             attachments: req.file ? [{ filename: req.file.originalname, path: req.file.path }] : []
           });
           results.push({ email: contact.to, status: 'Sent' });
@@ -841,13 +850,14 @@ export function createApp() {
     try {
       const { to, subject, body } = req.body;
       const { senderEmail, transporter } = createMailTransport(req);
+      const replyTo = resolveReplyTo(req);
 
       if (!to || !subject || !body) {
         return res.status(400).json({ success: false, error: 'Missing required email fields.' });
       }
 
       const attachments = req.files ? req.files.map((file) => ({ filename: file.originalname, path: file.path })) : [];
-      await transporter.sendMail({ from: senderEmail, to, subject, text: body, attachments });
+      await transporter.sendMail({ from: senderEmail, to, subject, text: body, replyTo, attachments });
 
       if (req.files) req.files.forEach((file) => fs.unlinkSync(file.path));
       res.json({ success: true, senderEmail });
