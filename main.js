@@ -328,14 +328,15 @@ function getMailBlockedMessage() {
 
 function updateSenderUi() {
   const capability = getEffectiveMailCapability();
-  const senderLabel = capability.mode === 'server-smtp'
-    ? `Server sender ${capability.senderEmail || 'configured'}`
+  const hasDirectSender = capability.mode === 'server-smtp' || capability.mode === 'resend-api';
+  const senderLabel = hasDirectSender
+    ? `${capability.mode === 'resend-api' ? 'Resend sender' : 'Server sender'} ${capability.senderEmail || 'configured'}`
     : currentUser?.email
       ? `${currentUser.displayName} (${currentUser.email})`
       : 'Login with Google to save your tracker. Gmail connect is optional.';
 
   const permissionHint = capability.canSendMail
-    ? capability.mode === 'server-smtp'
+    ? hasDirectSender
       ? 'Direct mail is ready. Gmail connect is not needed.'
       : 'Mail access is ready.'
     : currentUser?.email
@@ -345,7 +346,7 @@ function updateSenderUi() {
         : 'Mail sending is disabled until a server sender is configured.';
 
   const senderActionHref = currentUser?.email ? '/auth/google-gmail' : '/auth/google';
-  const senderActionLabel = capability.canSendMail && capability.mode !== 'server-smtp'
+  const senderActionLabel = capability.canSendMail && !hasDirectSender
     ? 'Reconnect Gmail Sender'
     : currentUser?.email
       ? 'Connect Gmail Sender'
@@ -353,8 +354,8 @@ function updateSenderUi() {
 
   bulkSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
   manualSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
-  bulkLoginHint.classList.toggle('hidden', capability.mode === 'server-smtp' || !capability.requiresGoogleAuth);
-  manualLoginHint.classList.toggle('hidden', capability.mode === 'server-smtp' || !capability.requiresGoogleAuth);
+  bulkLoginHint.classList.toggle('hidden', hasDirectSender || !capability.requiresGoogleAuth);
+  manualLoginHint.classList.toggle('hidden', hasDirectSender || !capability.requiresGoogleAuth);
   bulkLoginHint.textContent = senderActionLabel;
   bulkLoginHint.href = senderActionHref;
   manualLoginHint.textContent = senderActionLabel;

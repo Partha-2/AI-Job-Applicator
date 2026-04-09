@@ -125,6 +125,28 @@ function getSessionUser(req) {
   return getUserFromToken(req);
 }
 
+function extractEmailAddress(value) {
+  if (!value) return '';
+  const match = value.match(/<([^>]+)>/);
+  return (match?.[1] || value).trim();
+}
+
+function getResendConfig() {
+  const apiKey = process.env.RESEND_API_KEY || process.env.RESEND_KEY || '';
+  if (!apiKey) return null;
+
+  const from = process.env.RESEND_FROM_EMAIL
+    || process.env.RESEND_FROM
+    || process.env.RESEND_SENDER
+    || 'AI Job Applicator <onboarding@resend.dev>';
+
+  return {
+    apiKey,
+    from,
+    senderEmail: extractEmailAddress(from)
+  };
+}
+
 function getServerMailConfig() {
   const host = process.env.SMTP_HOST || process.env.MAIL_HOST || '';
   const configuredService = process.env.SMTP_SERVICE || process.env.MAIL_SERVICE || '';
@@ -150,6 +172,16 @@ function getServerMailConfig() {
 }
 
 function buildMailCapability(user) {
+  const resendConfig = getResendConfig();
+  if (resendConfig) {
+    return {
+      canSendMail: true,
+      mode: 'resend-api',
+      senderEmail: resendConfig.senderEmail,
+      requiresGoogleAuth: false
+    };
+  }
+
   const serverMail = getServerMailConfig();
   if (serverMail) {
     return {
@@ -185,6 +217,53 @@ function buildPublicUser(user) {
     mailMode: mailCapability.mode,
     senderEmail: mailCapability.senderEmail,
     requiresGoogleAuth: mailCapability.requiresGoogleAuth
+  };
+}
+
+function textToHtml(text) {
+  const safeText = (text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  return `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;white-space:normal;">${safeText.replace(/\n/g, '<br />')}</div>`;
+}
+
+function buildResendAttachments(attachments = []) {
+  return attachments.map((attachment) => ({
+    filename: attachment.filename,
+    content: fs.readFileSync(attachment.path).toString('base64')
+  }));
+}
+
+function createResendMailTransport() {
+  const resendConfig = getResendConfig();
+  if (!resendConfig) return null;
+
+  return {
+    senderEmail: resendConfig.senderEmail,
+    transporter: {
+      async sendMail(message) {
+        const payload = {
+          from: resendConfig.from,
+          to: Array.isArray(message.to) ? message.to : [message.to],
+          subject: message.subject,
+          html: message.html || textToHtml(message.text || ''),
+          text: message.text || '',
+          attachments: message.attachments?.length ? buildResendAttachments(message.attachments) : undefined
+        };
+
+        return axios.post('https://api.resend.com/emails', payload, {
+          headers: {
+            Authorization: `Bearer ${resendConfig.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        });
+      }
+    }
   };
 }
 
@@ -261,7 +340,7 @@ function createAuthenticatedGmailTransport(req) {
 }
 
 function createMailTransport(req) {
-  return createServerMailTransport() || createAuthenticatedGmailTransport(req);
+  return createResendMailTransport() || createServerMailTransport() || createAuthenticatedGmailTransport(req);
 }
 
 function buildOAuthUser(existingUser, profile, accessToken, refreshToken) {
@@ -277,9 +356,22 @@ function buildOAuthUser(existingUser, profile, accessToken, refreshToken) {
 }
 
 function normalizeMailerError(error) {
-  const rawMessage = error?.message || 'Email sending failed.';
+  const rawMessage = error?.response?.data?.message || error?.response?.data?.error || error?.message || 'Email sending failed.';
   const normalized = rawMessage.toLowerCase();
+  const hasResendSender = Boolean(getResendConfig());
   const hasServerSender = Boolean(getServerMailConfig());
+
+  if (hasResendSender && normalized.includes('api key')) {
+    return 'Resend rejected the API key. Update RESEND_API_KEY on the server.';
+  }
+
+  if (hasResendSender && normalized.includes('domain') && normalized.includes('not verified')) {
+    return 'Resend sender domain is not verified. Verify the domain in Resend and update RESEND_FROM_EMAIL.';
+  }
+
+  if (hasResendSender && normalized.includes('you can only send testing emails')) {
+    return 'Resend can only send test emails to your own address while using resend.dev. Verify a domain in Resend and set RESEND_FROM_EMAIL to that domain.';
+  }
 
   if (normalized.includes('gmail send access')) {
     return rawMessage;
