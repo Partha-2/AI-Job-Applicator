@@ -125,18 +125,94 @@ function getSessionUser(req) {
   return getUserFromToken(req);
 }
 
-function buildPublicUser(user) {
-  if (!user) return null;
+function getServerMailConfig() {
+  const host = process.env.SMTP_HOST || process.env.MAIL_HOST || '';
+  const configuredService = process.env.SMTP_SERVICE || process.env.MAIL_SERVICE || '';
+  const service = configuredService || (!host ? 'gmail' : '');
+  const user = process.env.SMTP_USER || process.env.MAIL_USER || process.env.EMAIL_USER || '';
+  const pass = process.env.SMTP_PASS || process.env.MAIL_PASS || process.env.EMAIL_PASS || '';
+
+  if (!user || !pass) return null;
+
+  const parsedPort = Number(process.env.SMTP_PORT || process.env.MAIL_PORT || '');
+  const secureFlag = (process.env.SMTP_SECURE || process.env.MAIL_SECURE || '').toLowerCase();
+  const secure = secureFlag ? secureFlag === 'true' : parsedPort === 465;
+
+  return {
+    host,
+    service,
+    port: Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : (secure ? 465 : 587),
+    secure,
+    user,
+    pass,
+    senderEmail: process.env.SMTP_FROM || process.env.MAIL_FROM || process.env.EMAIL_FROM || user
+  };
+}
+
+function buildMailCapability(user) {
+  const serverMail = getServerMailConfig();
+  if (serverMail) {
+    return {
+      canSendMail: true,
+      mode: 'server-smtp',
+      senderEmail: serverMail.senderEmail,
+      requiresGoogleAuth: false
+    };
+  }
 
   const gmailClientId = process.env.GOOGLE_GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
   const gmailClientSecret = process.env.GOOGLE_GMAIL_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+  const senderEmail = user?.email || user?.emails?.[0]?.value || '';
+
+  return {
+    canSendMail: Boolean(user?.refreshToken && gmailClientId && gmailClientSecret),
+    mode: 'google-oauth',
+    senderEmail,
+    requiresGoogleAuth: Boolean(gmailClientId && gmailClientSecret)
+  };
+}
+
+function buildPublicUser(user) {
+  if (!user) return null;
+  const mailCapability = buildMailCapability(user);
 
   return {
     id: user.id,
     displayName: user.displayName || 'User',
     email: user.email || user.emails?.[0]?.value || '',
     photo: user.photo || user.photos?.[0]?.value || '',
-    canSendMail: Boolean(user.refreshToken && gmailClientId && gmailClientSecret)
+    canSendMail: mailCapability.canSendMail,
+    mailMode: mailCapability.mode,
+    senderEmail: mailCapability.senderEmail,
+    requiresGoogleAuth: mailCapability.requiresGoogleAuth
+  };
+}
+
+function createServerMailTransport() {
+  const serverMail = getServerMailConfig();
+  if (!serverMail) return null;
+
+  const transportConfig = serverMail.service
+    ? {
+        service: serverMail.service,
+        auth: {
+          user: serverMail.user,
+          pass: serverMail.pass
+        }
+      }
+    : {
+        host: serverMail.host,
+        port: serverMail.port,
+        secure: serverMail.secure,
+        auth: {
+          user: serverMail.user,
+          pass: serverMail.pass
+        }
+      };
+
+  return {
+    senderEmail: serverMail.senderEmail,
+    transporter: nodemailer.createTransport(transportConfig)
   };
 }
 
@@ -184,6 +260,10 @@ function createAuthenticatedGmailTransport(req) {
   };
 }
 
+function createMailTransport(req) {
+  return createServerMailTransport() || createAuthenticatedGmailTransport(req);
+}
+
 function buildOAuthUser(existingUser, profile, accessToken, refreshToken) {
   return {
     id: existingUser?.id || profile.id,
@@ -199,6 +279,7 @@ function buildOAuthUser(existingUser, profile, accessToken, refreshToken) {
 function normalizeMailerError(error) {
   const rawMessage = error?.message || 'Email sending failed.';
   const normalized = rawMessage.toLowerCase();
+  const hasServerSender = Boolean(getServerMailConfig());
 
   if (normalized.includes('gmail send access')) {
     return rawMessage;
@@ -209,10 +290,16 @@ function normalizeMailerError(error) {
   }
 
   if (error?.code === 'EAUTH' || normalized.includes('535-5.7.8') || normalized.includes('badcredentials')) {
+    if (hasServerSender) {
+      return 'Server mail sender login failed. Check SMTP credentials on the server and use an app password if this is Gmail.';
+    }
     return 'Google rejected mail access for this session. Log out, sign in again with Google, and approve Gmail send access.';
   }
 
   if (normalized.includes('invalid login')) {
+    if (hasServerSender) {
+      return 'Server mail sender rejected the configured login. Update SMTP credentials on the server.';
+    }
     return 'Google mail login failed. Log out, sign in again with Google, and approve Gmail send access for this account.';
   }
 
@@ -513,7 +600,8 @@ export function createApp() {
   app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      mail: buildMailCapability(req.user)
     });
   });
 
@@ -628,7 +716,7 @@ export function createApp() {
     try {
       const { contacts } = req.body;
       const parsedContacts = JSON.parse(contacts || '[]');
-      const { senderEmail, transporter } = createAuthenticatedGmailTransport(req);
+      const { senderEmail, transporter } = createMailTransport(req);
 
       if (parsedContacts.length === 0) {
         return res.status(400).json({ success: false, error: 'Missing required fields.' });
@@ -660,7 +748,7 @@ export function createApp() {
   app.post('/api/send-single-email', upload.array('attachments'), async (req, res) => {
     try {
       const { to, subject, body } = req.body;
-      const { senderEmail, transporter } = createAuthenticatedGmailTransport(req);
+      const { senderEmail, transporter } = createMailTransport(req);
 
       if (!to || !subject || !body) {
         return res.status(400).json({ success: false, error: 'Missing required email fields.' });

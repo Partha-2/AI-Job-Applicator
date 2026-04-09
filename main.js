@@ -20,6 +20,7 @@ let appliedRecords = [];
 let currentPage = 1;
 const pageSize = 14;
 let currentUser = null;
+let mailCapability = { canSendMail: false, mode: 'unavailable', senderEmail: '', requiresGoogleAuth: false };
 let selectedJob = null;
 let selectedAppliedJob = null;
 let outreachContacts = [];
@@ -217,7 +218,8 @@ async function safeJson(response) {
 async function checkUserSession() {
   try {
     const healthResponse = await apiFetch('/api/health');
-    await safeJson(healthResponse);
+    const health = await safeJson(healthResponse);
+    mailCapability = health.mail || mailCapability;
 
     const userResponse = await apiFetch('/api/user');
     const user = await safeJson(userResponse);
@@ -303,19 +305,47 @@ function persistOutreachDraft() {
   }));
 }
 
-function updateSenderUi() {
-  const senderLabel = currentUser?.email
-    ? `${currentUser.displayName} (${currentUser.email})`
-    : 'Login with Google to save your tracker. Gmail connect is optional.';
+function getEffectiveMailCapability() {
+  return {
+    canSendMail: Boolean(currentUser?.canSendMail || mailCapability.canSendMail),
+    mode: currentUser?.mailMode || mailCapability.mode,
+    senderEmail: currentUser?.senderEmail || mailCapability.senderEmail || '',
+    requiresGoogleAuth: currentUser?.requiresGoogleAuth ?? mailCapability.requiresGoogleAuth
+  };
+}
 
-  const permissionHint = currentUser?.canSendMail
-    ? 'Mail access is ready.'
+function getMailBlockedMessage() {
+  const capability = getEffectiveMailCapability();
+
+  if (capability.requiresGoogleAuth) {
+    return currentUser?.email
+      ? 'Connect Gmail sender before sending mail.'
+      : 'Mail sending needs Google connect or a configured server sender.';
+  }
+
+  return 'Mail sending is not configured on the server yet.';
+}
+
+function updateSenderUi() {
+  const capability = getEffectiveMailCapability();
+  const senderLabel = capability.mode === 'server-smtp'
+    ? `Server sender ${capability.senderEmail || 'configured'}`
+    : currentUser?.email
+      ? `${currentUser.displayName} (${currentUser.email})`
+      : 'Login with Google to save your tracker. Gmail connect is optional.';
+
+  const permissionHint = capability.canSendMail
+    ? capability.mode === 'server-smtp'
+      ? 'Direct mail is ready. Gmail connect is not needed.'
+      : 'Mail access is ready.'
     : currentUser?.email
       ? 'Connect Gmail sender only if you want to send mail.'
-      : 'Mail sending is disabled until you log in.';
+      : capability.requiresGoogleAuth
+        ? 'Mail sending is disabled until you log in or connect Gmail.'
+        : 'Mail sending is disabled until a server sender is configured.';
 
   const senderActionHref = currentUser?.email ? '/auth/google-gmail' : '/auth/google';
-  const senderActionLabel = currentUser?.canSendMail
+  const senderActionLabel = capability.canSendMail && capability.mode !== 'server-smtp'
     ? 'Reconnect Gmail Sender'
     : currentUser?.email
       ? 'Connect Gmail Sender'
@@ -323,10 +353,14 @@ function updateSenderUi() {
 
   bulkSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
   manualSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
+  bulkLoginHint.classList.toggle('hidden', capability.mode === 'server-smtp' || !capability.requiresGoogleAuth);
+  manualLoginHint.classList.toggle('hidden', capability.mode === 'server-smtp' || !capability.requiresGoogleAuth);
   bulkLoginHint.textContent = senderActionLabel;
   bulkLoginHint.href = senderActionHref;
   manualLoginHint.textContent = senderActionLabel;
   manualLoginHint.href = senderActionHref;
+  fireAllMailsBtn.disabled = !capability.canSendMail;
+  sendManualBtn.disabled = !capability.canSendMail;
 
   document.getElementById('userProfile').classList.toggle('hidden', !currentUser?.email);
   headerLoginBtn.classList.toggle('hidden', Boolean(currentUser?.email));
@@ -1000,14 +1034,15 @@ function renderOutreachContacts() {
 
 async function sendBulkOutreach() {
   const resume = savedResumeFiles[0] || resumeUpload.files[0];
+  const capability = getEffectiveMailCapability();
 
   if (!outreachContacts.length) {
     setInlineStatus(outreachStatus, 'Load recruiter HTML first so there are contacts to send to.', 'warning');
     return;
   }
 
-  if (!currentUser?.canSendMail) {
-    setInlineStatus(outreachStatus, 'Login with Google and approve Gmail access before sending outreach.', 'warning');
+  if (!capability.canSendMail) {
+    setInlineStatus(outreachStatus, getMailBlockedMessage(), 'warning');
     return;
   }
 
@@ -1060,9 +1095,10 @@ async function sendManualEmail() {
   const subject = personalizeTemplate(manualSubjectInput.value.trim(), to);
   const body = personalizeTemplate(manualBodyInput.value.trim(), to);
   const files = savedManualAttachments.length ? savedManualAttachments : Array.from(manualAttachmentsInput.files || []);
+  const capability = getEffectiveMailCapability();
 
-  if (!currentUser?.canSendMail) {
-    setInlineStatus(manualStatus, 'Login with Google and approve Gmail access before sending mail.', 'warning');
+  if (!capability.canSendMail) {
+    setInlineStatus(manualStatus, getMailBlockedMessage(), 'warning');
     return;
   }
 
