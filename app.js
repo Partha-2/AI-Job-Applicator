@@ -178,22 +178,22 @@ function getServerMailConfig() {
 }
 
 function buildMailCapability(user) {
-  const resendConfig = getResendConfig();
-  if (resendConfig) {
-    return {
-      canSendMail: true,
-      mode: 'resend-api',
-      senderEmail: resendConfig.senderEmail,
-      requiresGoogleAuth: false
-    };
-  }
-
   const serverMail = getServerMailConfig();
   if (serverMail) {
     return {
       canSendMail: true,
       mode: 'server-smtp',
       senderEmail: serverMail.senderEmail,
+      requiresGoogleAuth: false
+    };
+  }
+
+  const resendConfig = getResendConfig();
+  if (resendConfig) {
+    return {
+      canSendMail: true,
+      mode: 'resend-api',
+      senderEmail: resendConfig.senderEmail,
       requiresGoogleAuth: false
     };
   }
@@ -347,7 +347,7 @@ function createAuthenticatedGmailTransport(req) {
 }
 
 function createMailTransport(req) {
-  return createResendMailTransport() || createServerMailTransport() || createAuthenticatedGmailTransport(req);
+  return createServerMailTransport() || createResendMailTransport() || createAuthenticatedGmailTransport(req);
 }
 
 function buildOAuthUser(existingUser, profile, accessToken, refreshToken) {
