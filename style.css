@@ -793,6 +793,67 @@ select {
   gap: 1rem;
 }
 
+.ats-grid,
+.ats-output-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.ats-grid {
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+}
+
+.ats-output-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ats-stats {
+  margin-bottom: 0.25rem;
+}
+
+.ats-textarea {
+  min-height: 220px;
+}
+
+.ats-output-text {
+  min-height: 140px;
+}
+
+.ats-output-card {
+  border-radius: 1.2rem;
+  padding: 1rem;
+}
+
+.ats-output-card h4 {
+  margin: 0 0 0.85rem;
+}
+
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.keyword-chip,
+.empty-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.1rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  font-size: 0.88rem;
+}
+
+.keyword-chip {
+  color: var(--text);
+}
+
+.empty-chip {
+  color: var(--text-muted);
+}
+
 .walkin-card {
   display: flex;
   flex-direction: column;
@@ -870,6 +931,11 @@ select {
   .hero-stats,
   .stats-grid {
     flex-direction: column;
+  }
+
+  .ats-grid,
+  .ats-output-grid {
+    grid-template-columns: 1fr;
   }
 
   .job-details-pane {

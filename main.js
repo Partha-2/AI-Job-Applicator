@@ -1,5 +1,6 @@
 import './style.css';
 import { createIcons, icons } from 'lucide';
+import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import Papa from 'papaparse';
 import * as xlsx from 'xlsx';
 
@@ -9,6 +10,7 @@ const APPLIED_CACHE_KEY = 'jobApplicator.appliedRecords';
 const THEME_KEY = 'jobApplicator.theme';
 const CLIENT_ID_KEY = 'jobApplicator.clientId';
 const OUTREACH_DRAFT_KEY = 'jobApplicator.outreachDraft';
+const ATS_TAILOR_KEY = 'jobApplicator.atsTailor';
 const GMAIL_APP_USER_KEY = 'jobApplicator.gmailAppUser';
 const GMAIL_APP_PASSWORD_KEY = 'jobApplicator.gmailAppPassword';
 const DRAFT_DB_NAME = 'jobApplicatorDrafts';
@@ -31,6 +33,7 @@ let outreachContacts = [];
 let outreachVariants = [];
 let savedManualAttachments = [];
 let savedResumeFiles = [];
+let atsAnalysis = null;
 
 const clientId = ensureClientId();
 
@@ -82,6 +85,19 @@ const savedResumeInfo = document.getElementById('savedResumeInfo');
 const fireAllMailsBtn = document.getElementById('fireAllMailsBtn');
 const sendManualBtn = document.getElementById('sendManualBtn');
 const headerLoginBtn = document.getElementById('loginBtn');
+const atsResumeInput = document.getElementById('atsResumeInput');
+const atsJobInput = document.getElementById('atsJobInput');
+const generateAtsBtn = document.getElementById('generateAtsBtn');
+const clearAtsBtn = document.getElementById('clearAtsBtn');
+const downloadAtsDocxBtn = document.getElementById('downloadAtsDocxBtn');
+const atsStatus = document.getElementById('atsStatus');
+const atsMatchScore = document.getElementById('atsMatchScore');
+const atsMatchedCount = document.getElementById('atsMatchedCount');
+const atsMissingCount = document.getElementById('atsMissingCount');
+const atsMatchedKeywords = document.getElementById('atsMatchedKeywords');
+const atsMissingKeywords = document.getElementById('atsMissingKeywords');
+const atsSummaryOutput = document.getElementById('atsSummaryOutput');
+const atsBulletsOutput = document.getElementById('atsBulletsOutput');
 
 const walkInList = document.getElementById('walkInList');
 const walkInMeta = document.getElementById('walkInMeta');
@@ -91,9 +107,11 @@ setupTheme();
 bindEvents();
 restoreOutreachDraft();
 restoreGmailAppPassword();
+restoreAtsDraft();
 initializeStoredFiles();
 updateSenderUi();
 checkUserSession();
+renderAtsAnalysis();
 
 function ensureClientId() {
   const existing = localStorage.getItem(CLIENT_ID_KEY);
@@ -176,12 +194,19 @@ function bindEvents() {
   document.getElementById('scanWalkinsBtn').addEventListener('click', scanWalkins);
   bulkAppPasswordBtn?.addEventListener('click', openGmailAppPasswordModal);
   manualAppPasswordBtn?.addEventListener('click', openGmailAppPasswordModal);
+  generateAtsBtn?.addEventListener('click', generateAtsTailor);
+  clearAtsBtn?.addEventListener('click', clearAtsTailor);
+  downloadAtsDocxBtn?.addEventListener('click', downloadAtsDocx);
   headerLoginBtn.addEventListener('click', () => {
     window.location.href = '/auth/google';
   });
 
   [manualToEmailInput, manualSubjectInput, manualBodyInput, scrapeUrlInput].forEach((element) => {
     element.addEventListener('input', persistOutreachDraft);
+  });
+
+  [atsResumeInput, atsJobInput].forEach((element) => {
+    element?.addEventListener('input', persistAtsDraft);
   });
 
   resumeUpload.addEventListener('change', async () => {
@@ -312,6 +337,212 @@ function persistOutreachDraft() {
     manualBody: manualBodyInput.value,
     scrapeUrl: scrapeUrlInput.value.trim()
   }));
+}
+
+function restoreAtsDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(ATS_TAILOR_KEY) || '{}');
+    atsResumeInput.value = draft.resume || '';
+    atsJobInput.value = draft.jobDescription || '';
+    atsAnalysis = draft.analysis || null;
+  } catch {
+    atsAnalysis = null;
+  }
+}
+
+function persistAtsDraft() {
+  localStorage.setItem(ATS_TAILOR_KEY, JSON.stringify({
+    resume: atsResumeInput.value,
+    jobDescription: atsJobInput.value,
+    analysis: atsAnalysis
+  }));
+}
+
+const ATS_KEYWORDS = [
+  'java', 'python', 'javascript', 'typescript', 'react', 'node.js', 'spring boot', 'sql', 'aws',
+  'azure', 'gcp', 'excel', 'power bi', 'tableau', 'analytics', 'reporting', 'stakeholder management',
+  'product strategy', 'roadmap', 'user research', 'ui/ux', 'figma', 'seo', 'content marketing',
+  'performance marketing', 'sales pipeline', 'crm', 'lead generation', 'customer success',
+  'operations', 'process improvement', 'vendor management', 'communication', 'leadership',
+  'project management', 'agile', 'scrum', 'problem solving', 'cross-functional collaboration'
+];
+const ATS_STOP_WORDS = new Set([
+  'and', 'the', 'with', 'from', 'into', 'that', 'this', 'will', 'your', 'their', 'have', 'has',
+  'had', 'for', 'our', 'you', 'are', 'but', 'not', 'all', 'any', 'can', 'able', 'using', 'use',
+  'used', 'about', 'than', 'then', 'them', 'they', 'who', 'what', 'when', 'where', 'while',
+  'work', 'works', 'working', 'role', 'team', 'years', 'year', 'experience', 'skills', 'skill',
+  'requirements', 'preferred', 'strong', 'good', 'excellent', 'knowledge', 'understanding'
+]);
+
+function normalizeKeywordText(text) {
+  return (text || '').toLowerCase().replace(/[^a-z0-9+.#/\s-]/g, ' ');
+}
+
+function getRelevantAtsKeywords(jobText) {
+  const normalized = normalizeKeywordText(jobText);
+  const matchedLibraryTerms = ATS_KEYWORDS.filter((keyword) => normalized.includes(keyword));
+  const phraseMatches = Array.from(new Set(
+    (jobText.match(/\b[A-Za-z0-9+/#.-]{3,}(?:\s+[A-Za-z0-9+/#.-]{3,}){0,2}\b/g) || [])
+      .map((phrase) => phrase.toLowerCase().trim())
+      .filter((phrase) => {
+        const words = phrase.split(/\s+/);
+        return words.some((word) => word.length > 3 && !ATS_STOP_WORDS.has(word));
+      })
+      .filter((phrase) => !ATS_STOP_WORDS.has(phrase))
+  )).slice(0, 20);
+
+  return Array.from(new Set([...matchedLibraryTerms, ...phraseMatches]))
+    .filter((keyword) => keyword.length > 2)
+    .slice(0, 18);
+}
+
+function formatKeywordList(keywords) {
+  if (!keywords.length) return '';
+  if (keywords.length === 1) return keywords[0];
+  if (keywords.length === 2) return `${keywords[0]} and ${keywords[1]}`;
+  return `${keywords.slice(0, -1).join(', ')}, and ${keywords.at(-1)}`;
+}
+
+function buildTailoredSummary(jobText, matchedKeywords, missingKeywords) {
+  const primaryFocus = matchedKeywords.slice(0, 4);
+  const growthAreas = missingKeywords.slice(0, 3);
+  const jdLine = jobText.split(/\n+/).find((line) => line.trim().length > 30) || 'high-impact roles aligned with your experience';
+  const firstSentence = primaryFocus.length
+    ? `Professional profile aligned with ${formatKeywordList(primaryFocus)} and positioned around the highest-signal skills from this target role.`
+    : 'Professional profile positioned around measurable outcomes, relevant tools, and clear business impact for the target role.';
+  const secondSentence = `Tailored for a role centered on ${jdLine.trim().slice(0, 120)}${jdLine.trim().length > 120 ? '...' : ''}`;
+  const thirdSentence = growthAreas.length
+    ? `Resume emphasis should clearly show hands-on exposure to ${formatKeywordList(growthAreas)} where relevant and truthful.`
+    : 'Resume emphasis should highlight measurable outcomes, ownership, and collaboration with cross-functional teams.';
+
+  return [firstSentence, secondSentence, thirdSentence].join(' ');
+}
+
+function buildTailoredBullets(matchedKeywords, missingKeywords) {
+  const bulletSeeds = [
+    `Tailor one bullet around ${formatKeywordList(matchedKeywords.slice(0, 3)) || 'the strongest overlapping skills from the job description'} with a measurable result.`,
+    `Add one bullet that shows impact through metrics, ownership, delivery speed, revenue influence, efficiency gains, or customer outcomes.`,
+    `Show cross-functional collaboration with the teams most relevant to the role, such as product, design, data, operations, sales, or engineering.`,
+    `Only add keywords like ${formatKeywordList(missingKeywords.slice(0, 3)) || 'target role terminology'} where your real experience can support them honestly.`
+  ];
+
+  return bulletSeeds.map((line) => `• ${line}`).join('\n');
+}
+
+function renderKeywordChips(container, keywords, emptyLabel) {
+  container.innerHTML = '';
+  if (!keywords.length) {
+    container.innerHTML = `<span class="empty-chip">${emptyLabel}</span>`;
+    return;
+  }
+
+  keywords.forEach((keyword) => {
+    const chip = document.createElement('span');
+    chip.className = 'keyword-chip';
+    chip.textContent = keyword;
+    container.appendChild(chip);
+  });
+}
+
+function renderAtsAnalysis() {
+  const analysis = atsAnalysis || {
+    score: 0,
+    matchedKeywords: [],
+    missingKeywords: [],
+    tailoredSummary: '',
+    tailoredBullets: ''
+  };
+
+  atsMatchScore.textContent = `${analysis.score || 0}%`;
+  atsMatchedCount.textContent = `${analysis.matchedKeywords?.length || 0}`;
+  atsMissingCount.textContent = `${analysis.missingKeywords?.length || 0}`;
+  atsSummaryOutput.value = analysis.tailoredSummary || '';
+  atsBulletsOutput.value = analysis.tailoredBullets || '';
+  renderKeywordChips(atsMatchedKeywords, analysis.matchedKeywords || [], 'Generate analysis to see matched skills.');
+  renderKeywordChips(atsMissingKeywords, analysis.missingKeywords || [], 'Missing skills will appear here.');
+  downloadAtsDocxBtn.disabled = !atsAnalysis;
+}
+
+function generateAtsTailor() {
+  const resumeText = atsResumeInput.value.trim();
+  const jobText = atsJobInput.value.trim();
+
+  if (!resumeText || !jobText) {
+    setInlineStatus(atsStatus, 'Paste both your resume text and the target job description first.', 'warning');
+    return;
+  }
+
+  const jobKeywords = getRelevantAtsKeywords(jobText);
+  const normalizedResume = normalizeKeywordText(resumeText);
+  const matchedKeywords = jobKeywords.filter((keyword) => normalizedResume.includes(keyword));
+  const missingKeywords = jobKeywords.filter((keyword) => !normalizedResume.includes(keyword));
+  const scoreBase = jobKeywords.length ? Math.round((matchedKeywords.length / jobKeywords.length) * 100) : 0;
+
+  atsAnalysis = {
+    score: Math.min(98, Math.max(12, scoreBase)),
+    matchedKeywords,
+    missingKeywords,
+    tailoredSummary: buildTailoredSummary(jobText, matchedKeywords, missingKeywords),
+    tailoredBullets: buildTailoredBullets(matchedKeywords, missingKeywords),
+    sourceResume: resumeText,
+    sourceJobDescription: jobText
+  };
+
+  persistAtsDraft();
+  renderAtsAnalysis();
+  setInlineStatus(atsStatus, `ATS tailoring complete. Matched ${matchedKeywords.length} keywords and highlighted ${missingKeywords.length} gaps.`, 'success');
+}
+
+function clearAtsTailor() {
+  atsResumeInput.value = '';
+  atsJobInput.value = '';
+  atsAnalysis = null;
+  localStorage.removeItem(ATS_TAILOR_KEY);
+  renderAtsAnalysis();
+  setInlineStatus(atsStatus, 'ATS tailor inputs and results cleared.', 'info');
+}
+
+async function downloadAtsDocx() {
+  if (!atsAnalysis) {
+    setInlineStatus(atsStatus, 'Generate ATS analysis before downloading the DOCX file.', 'warning');
+    return;
+  }
+
+  const doc = new Document({
+    sections: [{
+      properties: {},
+      children: [
+        new Paragraph({
+          text: 'ATS Tailored Resume Draft',
+          heading: HeadingLevel.TITLE
+        }),
+        new Paragraph({
+          children: [new TextRun({ text: `Match Score: ${atsAnalysis.score}%`, bold: true })]
+        }),
+        new Paragraph({ text: 'Tailored Summary', heading: HeadingLevel.HEADING_1 }),
+        new Paragraph({ text: atsAnalysis.tailoredSummary }),
+        new Paragraph({ text: 'Tailored Experience Bullets', heading: HeadingLevel.HEADING_1 }),
+        ...atsAnalysis.tailoredBullets.split('\n').filter(Boolean).map((line) => new Paragraph({ text: line.replace(/^•\s*/, ''), bullet: { level: 0 } })),
+        new Paragraph({ text: 'Matched Keywords', heading: HeadingLevel.HEADING_1 }),
+        new Paragraph({ text: atsAnalysis.matchedKeywords.join(', ') || 'None detected' }),
+        new Paragraph({ text: 'Missing Keywords To Add Truthfully', heading: HeadingLevel.HEADING_1 }),
+        new Paragraph({ text: atsAnalysis.missingKeywords.join(', ') || 'No obvious gaps detected' }),
+        new Paragraph({ text: 'Original Resume Text', heading: HeadingLevel.HEADING_1 }),
+        ...atsResumeInput.value.split('\n').filter((line) => line.trim()).map((line) => new Paragraph({ text: line.trim() }))
+      ]
+    }]
+  });
+
+  const blob = await Packer.toBlob(doc);
+  const downloadUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = 'ats-tailored-resume.docx';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(downloadUrl);
+  setInlineStatus(atsStatus, 'DOCX resume draft downloaded successfully.', 'success');
 }
 
 function restoreGmailAppPassword() {

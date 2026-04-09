@@ -57,6 +57,7 @@
           <button class="tab-btn active" data-target="jobsTabContent">Jobs Dashboard</button>
           <button class="tab-btn" data-target="appliedSection">Applied Tracker</button>
           <button class="tab-btn" data-target="outreachSection">Cold Outreach</button>
+          <button class="tab-btn" data-target="atsSection">ATS Resume Tailor</button>
           <button class="tab-btn" data-target="walkInSection">Walk-In Scanner</button>
         </div>
 
@@ -281,6 +282,92 @@
           <div id="walkInMeta" class="inline-status hidden"></div>
           <div id="walkInList" class="walkin-grid">
             <div class="empty-state">Run a live scan to fetch current walk-in links from public job sites.</div>
+          </div>
+        </section>
+
+        <section id="atsSection" class="tab-panel dashboard hidden">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Resume optimization</p>
+              <h2>ATS Resume Tailor</h2>
+            </div>
+            <div class="toolbar">
+              <button class="secondary-btn" id="clearAtsBtn">Clear</button>
+              <button class="secondary-btn" id="downloadAtsDocxBtn"><i data-lucide="file-down"></i> Download DOCX</button>
+              <button class="primary-btn" id="generateAtsBtn"><i data-lucide="sparkles"></i> Generate ATS Tailor</button>
+            </div>
+          </div>
+
+          <div class="ats-grid">
+            <div class="glass-card outreach-panel">
+              <div class="panel-header">
+                <div>
+                  <h3>Source Content</h3>
+                  <p class="muted-text">Paste your current resume text and any target job description to tailor for that role.</p>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Your Resume</label>
+                <textarea id="atsResumeInput" class="input-field textarea ats-textarea" placeholder="Paste your full resume text here..."></textarea>
+              </div>
+
+              <div class="form-group">
+                <label>Job Description</label>
+                <textarea id="atsJobInput" class="input-field textarea ats-textarea" placeholder="Paste the target job description here..."></textarea>
+              </div>
+              <div id="atsStatus" class="inline-status hidden"></div>
+            </div>
+
+            <div class="glass-card outreach-panel">
+              <div class="panel-header">
+                <div>
+                  <h3>ATS Insights</h3>
+                  <p class="muted-text">Keyword overlap, missing skills, and recruiter-friendly tailored copy.</p>
+                </div>
+              </div>
+
+              <div class="stats-grid ats-stats">
+                <div class="glass-card metric-card">
+                  <span class="stat-label">Match score</span>
+                  <strong id="atsMatchScore">0%</strong>
+                </div>
+                <div class="glass-card metric-card">
+                  <span class="stat-label">Matched keywords</span>
+                  <strong id="atsMatchedCount">0</strong>
+                </div>
+                <div class="glass-card metric-card">
+                  <span class="stat-label">Missing keywords</span>
+                  <strong id="atsMissingCount">0</strong>
+                </div>
+              </div>
+
+              <div class="ats-output-grid">
+                <div class="glass-card ats-output-card">
+                  <h4>Matched Keywords</h4>
+                  <div id="atsMatchedKeywords" class="tag-cloud">
+                    <span class="empty-chip">Generate analysis to see matched skills.</span>
+                  </div>
+                </div>
+
+                <div class="glass-card ats-output-card">
+                  <h4>Missing Keywords</h4>
+                  <div id="atsMissingKeywords" class="tag-cloud">
+                    <span class="empty-chip">Missing skills will appear here.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Tailored Summary</label>
+                <textarea id="atsSummaryOutput" class="input-field textarea ats-output-text" readonly placeholder="Generated summary will appear here..."></textarea>
+              </div>
+
+              <div class="form-group">
+                <label>Tailored Experience Bullets</label>
+                <textarea id="atsBulletsOutput" class="input-field textarea ats-output-text" readonly placeholder="Generated bullet points will appear here..."></textarea>
+              </div>
+            </div>
           </div>
         </section>
       </main>
