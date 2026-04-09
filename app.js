@@ -432,9 +432,13 @@ export function createApp() {
   const loginCallbackUrl = process.env.GOOGLE_LOGIN_CALLBACK_URL || process.env.GOOGLE_CALLBACK_URL || 'https://ai-job-applicator.vercel.app/auth/google/callback';
   const gmailClientId = process.env.GOOGLE_GMAIL_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
   const gmailClientSecret = process.env.GOOGLE_GMAIL_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
-  const gmailCallbackUrl = process.env.GOOGLE_GMAIL_CALLBACK_URL || 'https://ai-job-applicator.vercel.app/auth/google-gmail/callback';
+  const gmailUsesSameClient = Boolean(gmailClientId && gmailClientId === loginClientId);
+  const gmailCallbackUrl = process.env.GOOGLE_GMAIL_CALLBACK_URL
+    || (gmailUsesSameClient ? loginCallbackUrl : 'https://ai-job-applicator.vercel.app/auth/google-gmail/callback');
+  const loginConfigured = Boolean(loginClientId && loginClientId !== 'your_google_client_id_here' && loginClientSecret);
+  const gmailConfigured = Boolean(gmailClientId && gmailClientId !== 'your_google_client_id_here' && gmailClientSecret);
 
-  if (loginClientId && loginClientId !== 'your_google_client_id_here' && loginClientSecret) {
+  if (loginConfigured) {
     passport.use('google-login', new GoogleStrategy({
       clientID: loginClientId,
       clientSecret: loginClientSecret,
@@ -442,20 +446,17 @@ export function createApp() {
       passReqToCallback: true
     }, (req, accessToken, refreshToken, profile, done) => done(null, buildOAuthUser(req.user, profile, accessToken, refreshToken))));
 
-    app.get('/auth/google', passport.authenticate('google-login', { scope: ['profile', 'email'], session: false }));
-    app.get('/auth/google/callback',
-      passport.authenticate('google-login', { failureRedirect: `${frontendUrl}?loginError=oauth`, session: false }),
-      (req, res) => {
-        setAuthCookie(res, req.user);
-        res.redirect(frontendUrl);
-      }
-    );
+    app.get('/auth/google', passport.authenticate('google-login', {
+      scope: ['profile', 'email'],
+      state: 'login',
+      session: false
+    }));
   } else {
     console.warn('Google login OAuth keys missing. Google sign-in disabled.');
     app.get('/auth/google', (req, res) => res.status(501).json({ error: 'OAuth not configured.' }));
   }
 
-  if (gmailClientId && gmailClientId !== 'your_google_client_id_here' && gmailClientSecret) {
+  if (gmailConfigured) {
     passport.use('google-gmail', new GoogleStrategy({
       clientID: gmailClientId,
       clientSecret: gmailClientSecret,
@@ -465,20 +466,46 @@ export function createApp() {
 
     app.get('/auth/google-gmail', passport.authenticate('google-gmail', {
       scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.send'],
-      accessType: 'offline', prompt: 'consent', includeGrantedScopes: true, session: false
+      accessType: 'offline',
+      prompt: 'consent',
+      includeGrantedScopes: true,
+      state: 'gmail',
+      session: false
     }));
-    app.get('/auth/google-gmail/callback',
-      passport.authenticate('google-gmail', { failureRedirect: `${frontendUrl}?gmailError=oauth`, session: false }),
-      (req, res) => {
-        setAuthCookie(res, req.user);
-        res.redirect(frontendUrl);
-      }
-    );
   } else {
     console.warn('Gmail OAuth keys missing. Gmail sender connect disabled.');
     app.get('/auth/google-gmail', (req, res) => res.status(501).json({ error: 'Gmail OAuth not configured.' }));
   }
 
+  const finishOauthRedirect = (req, res) => {
+    setAuthCookie(res, req.user);
+    res.redirect(frontendUrl);
+  };
+
+  app.get('/auth/google/callback', (req, res, next) => {
+    const isGmailFlow = req.query.state === 'gmail';
+
+    if (isGmailFlow && !gmailConfigured) {
+      return res.status(501).json({ error: 'Gmail OAuth not configured.' });
+    }
+
+    if (!isGmailFlow && !loginConfigured) {
+      return res.status(501).json({ error: 'OAuth not configured.' });
+    }
+
+    const strategy = isGmailFlow ? 'google-gmail' : 'google-login';
+    const failureRedirect = frontendUrl + '?' + (isGmailFlow ? 'gmailError' : 'loginError') + '=oauth';
+    passport.authenticate(strategy, { failureRedirect, session: false })(req, res, next);
+  }, finishOauthRedirect);
+
+  if (gmailConfigured) {
+    app.get('/auth/google-gmail/callback',
+      passport.authenticate('google-gmail', { failureRedirect: frontendUrl + '?gmailError=oauth', session: false }),
+      finishOauthRedirect
+    );
+  } else {
+    app.get('/auth/google-gmail/callback', (req, res) => res.status(501).json({ error: 'Gmail OAuth not configured.' }));
+  }
   app.get('/api/user', (req, res) => {
     res.json(buildPublicUser(req.user));
   });
