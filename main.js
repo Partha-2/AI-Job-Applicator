@@ -1716,6 +1716,11 @@ function firstName(name) {
   return (name || 'Recruiter').trim().split(/\s+/)[0];
 }
 
+function greetingName(name) {
+  const resolved = firstName(name);
+  return resolved && resolved !== 'Recruiter' ? resolved : 'Sir/Madam';
+}
+
 function findContactByEmail(email) {
   const normalized = email.toLowerCase();
   return outreachContacts.find((contact) => contact.email.toLowerCase() === normalized) || null;
@@ -1745,14 +1750,19 @@ function personalizeTemplate(template, email) {
   const contact = findContactByEmail(email);
   const resolvedName = contact?.name || deriveNameFromEmail(email);
   const resolvedCompany = contact?.company || deriveCompanyFromEmail(email);
+  const resolvedGreetingName = greetingName(resolvedName);
+  const resolvedFullName = resolvedName && resolvedName !== 'Recruiter' ? resolvedName : 'Sir/Madam';
 
   let value = template
-    .replace(/\[Recruiter Name\]|\[First Name\]|\[Name\]|\[Recruiter\]/gi, firstName(resolvedName))
-    .replace(/\[Full Name\]/gi, resolvedName)
+    .replace(/\[Recruiter Name\]|\[First Name\]|\[Name\]|\[Recruiter\]/gi, resolvedGreetingName)
+    .replace(/\[Full Name\]/gi, resolvedFullName)
     .replace(/\[Company\]/gi, resolvedCompany);
 
-  value = value.replace(/^\s*(Hi|Hello)\s*,/i, `Hi ${firstName(resolvedName)},`);
-  value = value.replace(/^\s*(Hi|Hello)\s+(Sir\/Madam|Recruiter|Hiring Manager)\s*,/i, `Hi ${firstName(resolvedName)},`);
+  value = value.replace(/^\s*(Hi|Hello)\s*,/i, `Hi ${resolvedGreetingName},`);
+  value = value.replace(/^\s*(Hi|Hello)\s+(Sir\/Madam|Recruiter|Hiring Manager)\s*,/i, `Hi ${resolvedGreetingName},`);
+  value = value.replace(/^\s*(Hi|Hello)\s+\[\s*(Recruiter Name|First Name|Name|Recruiter)\s*\]\s*,/i, `Hi ${resolvedGreetingName},`);
+  value = value.replace(/^\s*Dear\s*,/i, `Dear ${resolvedGreetingName},`);
+  value = value.replace(/^\s*Dear\s+(Sir\/Madam|Recruiter|Hiring Manager)\s*,/i, `Dear ${resolvedGreetingName},`);
   return value;
 }
 
