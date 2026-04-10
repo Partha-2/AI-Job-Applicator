@@ -1718,10 +1718,11 @@ async function scanWalkins() {
     if (!response.ok) throw new Error(data.error || 'Walk-in scan failed.');
 
     walkInList.innerHTML = '';
+    const providerLabel = data.provider === 'serpapi-google-jobs' ? 'SerpApi / Google Jobs' : 'search scan';
 
     if (!data.walkins.length) {
-      walkInList.innerHTML = '<div class="empty-state">No live indexed walk-in postings were found for this role and location right now.</div>';
-      setInlineStatus(walkInMeta, `Checked ${formatDateTime(data.generatedAt)}. No real walk-in links were found yet.`, 'warning');
+      walkInList.innerHTML = '<div class="empty-state">No live jobs were found for this role and location right now.</div>';
+      setInlineStatus(walkInMeta, `Checked ${formatDateTime(data.generatedAt)} via ${providerLabel}. No live jobs were found yet.`, 'warning');
       return;
     }
 
@@ -1741,13 +1742,13 @@ async function scanWalkins() {
           ${renderBadge('calendar-days', item.dateLabel)}
         </div>
         <p class="walkin-copy">${item.description || item.snippet || 'Live listing link found from current search results.'}</p>
-        <div class="saved-draft">Scanned ${formatDateTime(data.generatedAt)}${item.publishedAt ? ` • listed ${formatDateTime(item.publishedAt)}` : ''}</div>
+        <div class="saved-draft">Scanned ${formatDateTime(data.generatedAt)} via ${providerLabel}${item.publishedAt ? ` • listed ${formatDateTime(item.publishedAt)}` : ''}</div>
         <a href="${item.verifyUrl}" target="_blank" rel="noopener noreferrer" class="primary-btn w-full"><i data-lucide="external-link"></i> Open Real Link</a>
       `;
       walkInList.appendChild(card);
     });
 
-    setInlineStatus(walkInMeta, `Updated ${formatDateTime(data.generatedAt)} with ${data.walkins.length} live result(s).`, 'success');
+    setInlineStatus(walkInMeta, `Updated ${formatDateTime(data.generatedAt)} via ${providerLabel} with ${data.walkins.length} live result(s).`, 'success');
     createIcons({ icons });
   } catch (error) {
     walkInList.innerHTML = '<div class="empty-state">Live scan failed. Check the backend server and internet access for the API.</div>';

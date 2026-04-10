@@ -20,6 +20,7 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, '.data');
 const APPLIED_JOBS_FILE = path.join(DATA_DIR, 'applied-jobs.json');
 const WALKIN_ALLOWED_HOSTS = ['naukri.com', 'linkedin.com', 'foundit.in', 'indeed.com', 'timesjobs.com'];
+const SERPAPI_SEARCH_URL = 'https://serpapi.com/search';
 
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -444,6 +445,10 @@ function decodeDuckDuckGoUrl(rawUrl) {
   }
 }
 
+function getSerpApiKey() {
+  return (process.env.SERPAPI_API_KEY || process.env.SERP_API_KEY || '').trim();
+}
+
 function isAllowedWalkinHost(url) {
   try {
     const hostname = new URL(url).hostname.replace(/^www\./, '');
@@ -455,6 +460,36 @@ function isAllowedWalkinHost(url) {
 
 function createSearchFallback(role, location) {
   return [];
+}
+
+function parseRelativePostedAt(rawValue) {
+  const text = (rawValue || '').toString().trim().toLowerCase();
+  if (!text) return null;
+  if (text.includes('just posted') || text.includes('today')) return new Date();
+  if (text.includes('yesterday')) {
+    const date = new Date();
+    date.setDate(date.getDate() - 1);
+    return date;
+  }
+
+  const match = text.match(/(\d+)\+?\s*(hour|day|week|month)s?\s*ago/);
+  if (!match) return extractWalkinDate(rawValue);
+
+  const amount = Number(match[1]);
+  const unit = match[2];
+  const date = new Date();
+
+  if (unit === 'hour') {
+    date.setHours(date.getHours() - amount);
+  } else if (unit === 'day') {
+    date.setDate(date.getDate() - amount);
+  } else if (unit === 'week') {
+    date.setDate(date.getDate() - (amount * 7));
+  } else if (unit === 'month') {
+    date.setMonth(date.getMonth() - amount);
+  }
+
+  return date;
 }
 
 function extractWalkinDate(rawValue) {
@@ -500,6 +535,147 @@ function scoreWalkinResult({ title = '', snippet = '', verifyUrl = '', role = ''
   });
 
   return score;
+}
+
+function scoreSerpApiJob({ title = '', company = '', description = '', location = '', role = '', publishedAt = '' }) {
+  const haystack = `${title} ${company} ${description} ${location}`.toLowerCase();
+  const roleTokens = role.toLowerCase().split(/\s+/).filter(Boolean);
+  const locationTokens = location.toLowerCase().split(/\s+/).filter(Boolean);
+  let score = 8;
+
+  roleTokens.forEach((token) => {
+    if (title.toLowerCase().includes(token)) score += 3;
+    else if (haystack.includes(token)) score += 1;
+  });
+
+  locationTokens.forEach((token) => {
+    if (haystack.includes(token)) score += 2;
+  });
+
+  if (publishedAt) {
+    const publishedTime = new Date(publishedAt).getTime();
+    if (!Number.isNaN(publishedTime)) {
+      const ageHours = Math.max(0, (Date.now() - publishedTime) / (1000 * 60 * 60));
+      if (ageHours <= 24) score += 5;
+      else if (ageHours <= 24 * 7) score += 3;
+      else if (ageHours <= 24 * 30) score += 1;
+    }
+  }
+
+  return score;
+}
+
+function hasClosedJobSignals(value) {
+  const haystack = (value || '').toString().toLowerCase();
+  return ['expired', 'no longer accepting applications', 'applications closed', 'job closed', 'position filled', 'posting closed']
+    .some((token) => haystack.includes(token));
+}
+
+function extractSerpApiUrl(job) {
+  const applyOptions = Array.isArray(job.apply_options) ? job.apply_options : [];
+  const relatedLinks = Array.isArray(job.related_links) ? job.related_links : [];
+  const candidates = [
+    ...applyOptions.map((option) => option?.link),
+    ...relatedLinks.map((option) => option?.link),
+    job.share_link,
+    job.link
+  ];
+
+  return candidates.find((candidate) => {
+    try {
+      const parsed = new URL(candidate);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }) || '';
+}
+
+function extractSerpApiPostedLabel(job) {
+  const detected = job?.detected_extensions || {};
+  const fromDetected = detected.posted_at || detected.schedule_type || '';
+  if (fromDetected) return fromDetected;
+  const extensions = Array.isArray(job?.extensions) ? job.extensions : [];
+  return extensions.find((value) => /posted|ago|today|yesterday/i.test(value || '')) || '';
+}
+
+function buildSerpApiJobResult(job, index, role, fallbackLocation) {
+  const verifyUrl = extractSerpApiUrl(job);
+  const title = (job?.title || '').trim();
+  const company = (job?.company_name || job?.company || '').trim() || 'Unknown Company';
+  const location = (job?.location || fallbackLocation || '').trim() || fallbackLocation;
+  const rawPostedLabel = extractSerpApiPostedLabel(job);
+  const publishedAt = parseRelativePostedAt(rawPostedLabel);
+  const description = (job?.description || '').trim()
+    || (Array.isArray(job?.extensions) ? job.extensions.filter(Boolean).join(' • ') : '')
+    || 'Live Google Jobs result.';
+  const source = (job?.via || 'Google Jobs').toString().trim();
+  const closedSignals = `${title} ${description} ${rawPostedLabel} ${source}`;
+
+  if (!title || !verifyUrl || hasClosedJobSignals(closedSignals)) {
+    return null;
+  }
+
+  return {
+    id: `serpapi-${index}-${job?.job_id || Buffer.from(verifyUrl).toString('base64').slice(0, 10)}`,
+    title,
+    company,
+    location,
+    dateLabel: rawPostedLabel || formatWalkinDateLabel(publishedAt),
+    description,
+    verifyUrl,
+    source,
+    snippet: description,
+    publishedAt: publishedAt?.toISOString() || '',
+    score: scoreSerpApiJob({ title, company, description, location, role, publishedAt: publishedAt?.toISOString() || '' })
+  };
+}
+
+async function fetchSerpApiJobs(role, location) {
+  const apiKey = getSerpApiKey();
+  if (!apiKey) return [];
+
+  const response = await axios.get(SERPAPI_SEARCH_URL, {
+    params: {
+      engine: 'google_jobs',
+      q: role,
+      location,
+      gl: 'in',
+      hl: 'en',
+      no_cache: 'true',
+      api_key: apiKey
+    },
+    timeout: 15000
+  });
+
+  const jobs = Array.isArray(response.data?.jobs_results) ? response.data.jobs_results : [];
+
+  return jobs
+    .map((job, index) => buildSerpApiJobResult(job, index, role, location))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const scoreDelta = (right.score || 0) - (left.score || 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const rightDate = right.publishedAt ? new Date(right.publishedAt).getTime() : 0;
+      const leftDate = left.publishedAt ? new Date(left.publishedAt).getTime() : 0;
+      return rightDate - leftDate;
+    })
+    .slice(0, 12);
+}
+
+function normalizeWalkinProviderError(error) {
+  const status = error?.response?.status;
+  const message = error?.response?.data?.error || error?.message || 'Unable to fetch live jobs right now.';
+
+  if (status === 401 || status === 403) {
+    return 'SerpApi rejected the configured API key. Add a valid SERPAPI_API_KEY on the server.';
+  }
+
+  if (message.toLowerCase().includes('api key')) {
+    return 'SerpApi rejected the configured API key. Add a valid SERPAPI_API_KEY on the server.';
+  }
+
+  return message;
 }
 
 async function searchWalkinQueryViaBing(query, location) {
@@ -621,6 +797,15 @@ async function searchWalkinQuery(query, location) {
 }
 
 async function fetchLiveWalkins(role, location) {
+  if (getSerpApiKey()) {
+    const serpApiResults = await fetchSerpApiJobs(role, location);
+    return {
+      provider: 'serpapi-google-jobs',
+      realtime: true,
+      results: serpApiResults
+    };
+  }
+
   const now = new Date();
   const monthLabel = now.toLocaleDateString('en-IN', { month: 'long' });
   const yearLabel = `${now.getFullYear()}`;
@@ -657,7 +842,11 @@ async function fetchLiveWalkins(role, location) {
       return rightDate - leftDate;
     })
     .slice(0, 12);
-  return liveResults.length > 0 ? liveResults : createSearchFallback(role, location);
+  return {
+    provider: 'search-fallback',
+    realtime: false,
+    results: liveResults.length > 0 ? liveResults : createSearchFallback(role, location)
+  };
 }
 
 export function createApp() {
@@ -778,7 +967,11 @@ export function createApp() {
     res.json({
       ok: true,
       timestamp: new Date().toISOString(),
-      mail: buildMailCapability(req.user)
+      mail: buildMailCapability(req.user),
+      jobs: {
+        provider: getSerpApiKey() ? 'serpapi-google-jobs' : 'search-fallback',
+        realtime: Boolean(getSerpApiKey())
+      }
     });
   });
 
@@ -873,18 +1066,20 @@ export function createApp() {
     res.set('Cache-Control', 'no-store');
 
     try {
-      const walkins = await fetchLiveWalkins(role, location);
+      const { results, provider, realtime } = await fetchLiveWalkins(role, location);
       res.json({
-        walkins,
+        walkins: results,
         generatedAt: new Date().toISOString(),
         location,
         role,
-        liveResultsFound: walkins.length > 0
+        provider,
+        realtime,
+        liveResultsFound: results.length > 0
       });
     } catch (error) {
       res.status(500).json({
         success: false,
-        error: 'Unable to fetch live walk-in links right now.',
+        error: normalizeWalkinProviderError(error),
         details: error.message
       });
     }
