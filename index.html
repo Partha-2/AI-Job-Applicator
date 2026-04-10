@@ -190,6 +190,19 @@
                     <input type="file" id="resumeUpload" class="file-styled" accept=".pdf" />
                     <div id="savedResumeInfo" class="saved-draft">No resume saved yet.</div>
                   </div>
+                  <div class="form-group">
+                    <label>Bulk Subject</label>
+                    <input type="text" id="bulkSubject" class="input-field" placeholder="Application for relevant opportunity" />
+                  </div>
+                  <div class="form-group">
+                    <label>Bulk Body</label>
+                    <textarea id="bulkBody" class="input-field textarea" rows="10" placeholder="Use [Name], [Recruiter Name], [Company] for automatic personalization."></textarea>
+                    <div class="saved-draft">This bulk template auto-saves locally. If a recruiter name is missing, the app will use Sir/Madam.</div>
+                  </div>
+                  <div class="form-group">
+                    <label>First Contact Preview</label>
+                    <div id="bulkPreview" class="saved-draft bulk-preview">Load recruiter HTML to preview the first personalized email.</div>
+                  </div>
                   <button class="primary-btn w-full" id="fireAllMailsBtn"><i data-lucide="zap"></i> Send Bulk Outreach</button>
                 </div>
 

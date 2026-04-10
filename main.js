@@ -80,6 +80,9 @@ const manualSenderStatus = document.getElementById('manualSenderStatus');
 const manualLoginHint = document.getElementById('manualLoginHint');
 const manualAppPasswordBtn = document.getElementById('manualAppPasswordBtn');
 const resumeUpload = document.getElementById('resumeUpload');
+const bulkSubjectInput = document.getElementById('bulkSubject');
+const bulkBodyInput = document.getElementById('bulkBody');
+const bulkPreview = document.getElementById('bulkPreview');
 const manualToEmailInput = document.getElementById('manualToEmail');
 const manualSubjectInput = document.getElementById('manualSubject');
 const manualBodyInput = document.getElementById('manualBody');
@@ -209,8 +212,12 @@ function bindEvents() {
     window.location.href = '/auth/google';
   });
 
-  [manualToEmailInput, manualSubjectInput, manualBodyInput, scrapeUrlInput].forEach((element) => {
+  [bulkSubjectInput, bulkBodyInput, manualToEmailInput, manualSubjectInput, manualBodyInput, scrapeUrlInput].forEach((element) => {
     element.addEventListener('input', persistOutreachDraft);
+  });
+
+  [bulkSubjectInput, bulkBodyInput].forEach((element) => {
+    element.addEventListener('input', renderBulkPreview);
   });
 
   [atsResumeInput, atsJobInput].forEach((element) => {
@@ -325,21 +332,37 @@ function getDefaultManualBody() {
   return 'Hi [Recruiter Name],\n\nI wanted to share my profile for opportunities at [Company]. Please find my resume attached.\n\nBest regards,';
 }
 
+function getDefaultBulkSubject() {
+  return 'Application for relevant opportunity';
+}
+
+function getDefaultBulkBody() {
+  return getDefaultManualBody();
+}
+
 function restoreOutreachDraft() {
   try {
     const draft = JSON.parse(localStorage.getItem(OUTREACH_DRAFT_KEY) || '{}');
+    bulkSubjectInput.value = draft.bulkSubject || getDefaultBulkSubject();
+    bulkBodyInput.value = draft.bulkBody || getDefaultBulkBody();
     manualToEmailInput.value = draft.manualToEmail || '';
     manualSubjectInput.value = draft.manualSubject || 'Application for relevant opportunity';
     manualBodyInput.value = draft.manualBody || getDefaultManualBody();
     scrapeUrlInput.value = draft.scrapeUrl || '';
   } catch {
+    bulkSubjectInput.value = getDefaultBulkSubject();
+    bulkBodyInput.value = getDefaultBulkBody();
     manualSubjectInput.value = 'Application for relevant opportunity';
     manualBodyInput.value = getDefaultManualBody();
   }
+
+  renderBulkPreview();
 }
 
 function persistOutreachDraft() {
   localStorage.setItem(OUTREACH_DRAFT_KEY, JSON.stringify({
+    bulkSubject: bulkSubjectInput.value.trim(),
+    bulkBody: bulkBodyInput.value,
     manualToEmail: manualToEmailInput.value.trim(),
     manualSubject: manualSubjectInput.value.trim(),
     manualBody: manualBodyInput.value,
@@ -1370,6 +1393,8 @@ function parseOutreachHTML(htmlString) {
     }];
   }
 
+  applyBulkTemplate(outreachVariants[0]);
+
   if (outreachContacts.length === 0) {
     setInlineStatus(outreachStatus, 'No recruiter emails were detected in that HTML file.', 'warning');
     return;
@@ -1479,6 +1504,31 @@ function renderOutreachContacts() {
   });
 
   createIcons({ icons });
+  renderBulkPreview();
+}
+
+function applyBulkTemplate(template) {
+  bulkSubjectInput.value = template?.subject || getDefaultBulkSubject();
+  bulkBodyInput.value = template?.bodyTemplate || getDefaultBulkBody();
+  persistOutreachDraft();
+  renderBulkPreview();
+}
+
+function renderBulkPreview() {
+  if (!bulkPreview) return;
+
+  const subjectTemplate = bulkSubjectInput.value.trim() || getDefaultBulkSubject();
+  const bodyTemplate = bulkBodyInput.value || getDefaultBulkBody();
+
+  if (!outreachContacts.length) {
+    bulkPreview.textContent = 'Load recruiter HTML to preview the first personalized email.';
+    return;
+  }
+
+  const contact = outreachContacts[0];
+  const previewSubject = personalizeTemplate(subjectTemplate, contact.email);
+  const previewBody = personalizeTemplate(bodyTemplate, contact.email);
+  bulkPreview.textContent = `Preview for ${contact.name || contact.email}\nSubject: ${previewSubject}\n\n${previewBody}`;
 }
 
 async function sendBulkOutreach() {
@@ -1501,11 +1551,18 @@ async function sendBulkOutreach() {
     return;
   }
 
-  const template = outreachVariants[0];
+  const subjectTemplate = bulkSubjectInput.value.trim() || outreachVariants[0]?.subject || getDefaultBulkSubject();
+  const bodyTemplate = bulkBodyInput.value || outreachVariants[0]?.bodyTemplate || getDefaultBulkBody();
+
+  if (!subjectTemplate || !bodyTemplate.trim()) {
+    setInlineStatus(outreachStatus, 'Add both bulk subject and bulk body before sending.', 'warning');
+    return;
+  }
+
   const contacts = outreachContacts.map((contact) => ({
     to: contact.email,
-    subject: personalizeTemplate(template.subject, contact.email),
-    body: personalizeTemplate(template.bodyTemplate, contact.email)
+    subject: personalizeTemplate(subjectTemplate, contact.email),
+    body: personalizeTemplate(bodyTemplate, contact.email)
   }));
 
   const payload = new FormData();
@@ -1718,7 +1775,8 @@ function firstName(name) {
 
 function greetingName(name) {
   const resolved = firstName(name);
-  return resolved && resolved !== 'Recruiter' ? resolved : 'Sir/Madam';
+  const genericGreetings = new Set(['recruiter', 'hiring', 'careers', 'jobs', 'talent', 'team', 'admin', 'info', 'hr']);
+  return resolved && !genericGreetings.has(resolved.toLowerCase()) ? resolved : 'Sir/Madam';
 }
 
 function findContactByEmail(email) {
@@ -1751,12 +1809,12 @@ function personalizeTemplate(template, email) {
   const resolvedName = contact?.name || deriveNameFromEmail(email);
   const resolvedCompany = contact?.company || deriveCompanyFromEmail(email);
   const resolvedGreetingName = greetingName(resolvedName);
-  const resolvedFullName = resolvedName && resolvedName !== 'Recruiter' ? resolvedName : 'Sir/Madam';
+  const resolvedFullName = resolvedGreetingName === 'Sir/Madam' ? 'Sir/Madam' : resolvedName;
 
   let value = template
-    .replace(/\[Recruiter Name\]|\[First Name\]|\[Name\]|\[Recruiter\]/gi, resolvedGreetingName)
-    .replace(/\[Full Name\]/gi, resolvedFullName)
-    .replace(/\[Company\]/gi, resolvedCompany);
+    .replace(/\[\s*(Recruiter Name|First Name|Name|Recruiter)\s*\]/gi, resolvedGreetingName)
+    .replace(/\[\s*Full Name\s*\]/gi, resolvedFullName)
+    .replace(/\[\s*Company\s*\]/gi, resolvedCompany);
 
   value = value.replace(/^\s*(Hi|Hello)\s*,/i, `Hi ${resolvedGreetingName},`);
   value = value.replace(/^\s*(Hi|Hello)\s+(Sir\/Madam|Recruiter|Hiring Manager)\s*,/i, `Hi ${resolvedGreetingName},`);

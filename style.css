@@ -591,6 +591,11 @@ select {
   line-height: 1.5;
 }
 
+.bulk-preview {
+  white-space: pre-wrap;
+  min-height: 150px;
+}
+
 .outreach-item {
   align-items: center;
   padding: 0.95rem 1rem;
