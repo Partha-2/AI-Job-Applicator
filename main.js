@@ -1504,10 +1504,8 @@ async function sendBulkOutreach() {
   const template = outreachVariants[0];
   const contacts = outreachContacts.map((contact) => ({
     to: contact.email,
-    subject: template.subject,
-    body: template.bodyTemplate
-      .replace(/\[Recruiter Name\]/gi, firstName(contact.name))
-      .replace(/\[Company\]/gi, contact.company || 'your company')
+    subject: personalizeTemplate(template.subject, contact.email),
+    body: personalizeTemplate(template.bodyTemplate, contact.email)
   }));
 
   const payload = new FormData();
@@ -1749,11 +1747,12 @@ function personalizeTemplate(template, email) {
   const resolvedCompany = contact?.company || deriveCompanyFromEmail(email);
 
   let value = template
-    .replace(/\[Recruiter Name\]|\[First Name\]/gi, firstName(resolvedName))
+    .replace(/\[Recruiter Name\]|\[First Name\]|\[Name\]|\[Recruiter\]/gi, firstName(resolvedName))
     .replace(/\[Full Name\]/gi, resolvedName)
     .replace(/\[Company\]/gi, resolvedCompany);
 
   value = value.replace(/^\s*(Hi|Hello)\s*,/i, `Hi ${firstName(resolvedName)},`);
+  value = value.replace(/^\s*(Hi|Hello)\s+(Sir\/Madam|Recruiter|Hiring Manager)\s*,/i, `Hi ${firstName(resolvedName)},`);
   return value;
 }
 
