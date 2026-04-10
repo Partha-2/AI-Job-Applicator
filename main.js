@@ -1385,11 +1385,24 @@ function parseOutreachHTML(htmlString) {
 function extractContactsFromDocument(doc) {
   const contactsMap = new Map();
 
+  doc.querySelectorAll('.cc').forEach((card) => {
+    const email = card.querySelector('.cc-email a[href^="mailto:"]')?.getAttribute('href')?.replace(/^mailto:/i, '').trim();
+    if (!email) return;
+
+    contactsMap.set(email.toLowerCase(), {
+      email,
+      name: card.querySelector('.cc-name')?.textContent?.trim() || 'Recruiter',
+      company: card.querySelector('.cc-company')?.textContent?.trim() || ''
+    });
+  });
+
   doc.querySelectorAll('a[href^="mailto:"]').forEach((anchor) => {
     const email = anchor.getAttribute('href').replace(/^mailto:/i, '').trim();
     if (!email) return;
 
-    const card = anchor.closest('.contact-card, .outreach-item, tr, li, div');
+    if (contactsMap.has(email.toLowerCase())) return;
+
+    const card = anchor.closest('.cc, .contact-card, .today-card, .outreach-item, tr, li, div');
     const surroundingText = card?.textContent?.replace(/\s+/g, ' ').trim() || anchor.textContent.trim();
     const companyMatch = surroundingText.match(/at\s+([A-Za-z0-9 &.-]+)/i);
 
@@ -1416,6 +1429,17 @@ function extractContactsFromDocument(doc) {
 
 function extractTemplatesFromDocument(doc) {
   const templates = [];
+
+  doc.querySelectorAll('.oc').forEach((card, index) => {
+    const subject = card.querySelector('.oc-subj')?.textContent?.replace(/^Subject:\s*/i, '').trim()
+      || card.querySelector('.oc-varname')?.textContent?.trim()
+      || `Outreach Template ${index + 1}`;
+    const body = card.querySelector('.oc-text')?.textContent?.trim() || '';
+
+    if (body) {
+      templates.push({ id: `template-oc-${index + 1}`, subject, bodyTemplate: body });
+    }
+  });
 
   doc.querySelectorAll('.outreach-card, [data-outreach-template]').forEach((card, index) => {
     const subject = card.querySelector('.outreach-subject')?.textContent?.replace('Subject:', '').trim() || `Outreach Template ${index + 1}`;
