@@ -407,21 +407,21 @@ function normalizeMailerError(error) {
   }
 
   if (normalized.includes('sign in with google first')) {
-    return 'Sign in with Google or provide your Gmail App Password before sending mail.';
+    return 'Mail sender is not configured on the server. Add RESEND_API_KEY and RESEND_FROM_EMAIL.';
   }
 
   if (error?.code === 'EAUTH' || normalized.includes('535-5.7.8') || normalized.includes('badcredentials')) {
     if (hasServerSender) {
       return 'Server mail sender login failed. Check SMTP credentials on the server and use an app password if this is Gmail.';
     }
-    return 'Gmail login failed. Re-check the Gmail address and 16-character App Password, or reconnect Google sender.';
+    return 'Mail sender authentication failed. Configure a valid server sender (recommended: Resend).';
   }
 
   if (normalized.includes('invalid login')) {
     if (hasServerSender) {
       return 'Server mail sender rejected the configured login. Update SMTP credentials on the server.';
     }
-    return 'Gmail login failed. Make sure you are using a 16-character Google App Password, not your normal Gmail password.';
+    return 'Mail sender login failed. Configure a valid server sender (recommended: Resend).';
   }
 
   if (normalized.includes('daily user sending quota exceeded')) {

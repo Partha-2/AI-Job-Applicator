@@ -45,7 +45,7 @@
           <div>
             <p class="eyebrow">Track applications, outreach, and walk-ins</p>
             <h1>Keep every opportunity in one place.</h1>
-            <p class="hero-copy">Upload exports, move applied roles into history, reach recruiters, and scan live walk-in links from the same workspace. No login is needed for the tracker. Google is only used if you choose to send Gmail from Outreach.</p>
+            <p class="hero-copy">Upload exports, move applied roles into history, reach recruiters, and scan live walk-in links from the same workspace. No login is needed for the tracker, and outreach uses the configured app sender directly.</p>
           </div>
           <div class="hero-stats">
             <div class="stat-card">
@@ -186,11 +186,7 @@
                   <div class="sender-panel">
                     <div>
                       <label>Sender Account</label>
-                      <div id="bulkSenderStatus" class="saved-draft">Login with Google to send from your account.</div>
-                    </div>
-                    <div class="sender-actions">
-                      <button id="bulkAppPasswordBtn" type="button" class="secondary-btn">Use Gmail App Password</button>
-                      <a href="/auth/google-gmail" id="bulkLoginHint" class="secondary-btn">Connect Google Sender</a>
+                      <div id="bulkSenderStatus" class="saved-draft">Server sender is used automatically. No extra setup required for users.</div>
                     </div>
                   </div>
                   <div class="form-group">
@@ -253,11 +249,7 @@
                     <label>Sender Account</label>
                     <div class="sender-panel">
                       <div class="w-full">
-                        <div id="manualSenderStatus" class="saved-draft">Login with Google to send mail from your account.</div>
-                      </div>
-                      <div class="sender-actions">
-                        <button id="manualAppPasswordBtn" type="button" class="secondary-btn">Use Gmail App Password</button>
-                        <a href="/auth/google-gmail" id="manualLoginHint" class="secondary-btn">Connect Gmail Sender</a>
+                        <div id="manualSenderStatus" class="saved-draft">Server sender is used automatically. No extra setup required for users.</div>
                       </div>
                     </div>
                   </div>
@@ -279,7 +271,6 @@
                     <input type="file" id="manualAttachments" multiple class="file-styled" />
                     <div id="savedAttachmentInfo" class="saved-draft">No attachments saved yet.</div>
                   </div>
-                  <button class="secondary-btn w-full" id="manualGmailWebBtn"><i data-lucide="mail"></i> Open in Gmail (Easy)</button>
                   <button class="primary-btn w-full" id="sendManualBtn"><i data-lucide="send"></i> Send Email</button>
                   <div id="manualStatus" class="inline-status hidden"></div>
                 </div>

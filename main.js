@@ -15,8 +15,6 @@ const THEME_KEY = 'jobApplicator.theme';
 const CLIENT_ID_KEY = 'jobApplicator.clientId';
 const OUTREACH_DRAFT_KEY = 'jobApplicator.outreachDraft';
 const ATS_TAILOR_KEY = 'jobApplicator.atsTailor';
-const GMAIL_APP_USER_KEY = 'jobApplicator.gmailAppUser';
-const GMAIL_APP_PASSWORD_KEY = 'jobApplicator.gmailAppPassword';
 const DRAFT_DB_NAME = 'jobApplicatorDrafts';
 const DRAFT_FILE_STORE = 'files';
 const MANUAL_ATTACHMENT_KEY = 'manualAttachments';
@@ -29,8 +27,6 @@ let currentPage = 1;
 const pageSize = 14;
 let currentUser = null;
 let mailCapability = { canSendMail: false, mode: 'unavailable', senderEmail: '', requiresGoogleAuth: false };
-let gmailAppUser = '';
-let gmailAppPassword = '';
 let selectedJob = null;
 let selectedAppliedJob = null;
 let outreachContacts = [];
@@ -74,11 +70,7 @@ const outreachStatus = document.getElementById('outreachStatus');
 const manualStatus = document.getElementById('manualStatus');
 const scrapeStatus = document.getElementById('scrapeStatus');
 const bulkSenderStatus = document.getElementById('bulkSenderStatus');
-const bulkLoginHint = document.getElementById('bulkLoginHint');
-const bulkAppPasswordBtn = document.getElementById('bulkAppPasswordBtn');
 const manualSenderStatus = document.getElementById('manualSenderStatus');
-const manualLoginHint = document.getElementById('manualLoginHint');
-const manualAppPasswordBtn = document.getElementById('manualAppPasswordBtn');
 const resumeUpload = document.getElementById('resumeUpload');
 const bulkSubjectInput = document.getElementById('bulkSubject');
 const bulkBodyInput = document.getElementById('bulkBody');
@@ -92,7 +84,6 @@ const savedAttachmentInfo = document.getElementById('savedAttachmentInfo');
 const savedResumeInfo = document.getElementById('savedResumeInfo');
 const fireAllMailsBtn = document.getElementById('fireAllMailsBtn');
 const sendManualBtn = document.getElementById('sendManualBtn');
-const manualGmailWebBtn = document.getElementById('manualGmailWebBtn');
 const headerLoginBtn = document.getElementById('loginBtn');
 const atsResumeInput = document.getElementById('atsResumeInput');
 const atsResumeFileInput = document.getElementById('atsResumeFileInput');
@@ -117,7 +108,6 @@ setupTabs();
 setupTheme();
 bindEvents();
 restoreOutreachDraft();
-restoreGmailAppPassword();
 restoreAtsDraft();
 initializeStoredFiles();
 updateSenderUi();
@@ -201,11 +191,8 @@ function bindEvents() {
   outreachFileInput.addEventListener('change', handleOutreachUpload);
   document.getElementById('fireAllMailsBtn').addEventListener('click', sendBulkOutreach);
   document.getElementById('sendManualBtn').addEventListener('click', sendManualEmail);
-  manualGmailWebBtn?.addEventListener('click', openManualInGmailWeb);
   document.getElementById('scrapeBtn').addEventListener('click', scrapeEmailsFromUrl);
   document.getElementById('scanWalkinsBtn').addEventListener('click', scanWalkins);
-  bulkAppPasswordBtn?.addEventListener('click', openGmailAppPasswordModal);
-  manualAppPasswordBtn?.addEventListener('click', openGmailAppPasswordModal);
   generateAtsBtn?.addEventListener('click', generateAtsTailor);
   clearAtsBtn?.addEventListener('click', clearAtsTailor);
   downloadAtsDocxBtn?.addEventListener('click', downloadAtsDocx);
@@ -658,91 +645,6 @@ async function downloadAtsDocx() {
   setInlineStatus(atsStatus, 'DOCX resume draft downloaded successfully.', 'success');
 }
 
-function restoreGmailAppPassword() {
-  gmailAppUser = localStorage.getItem(GMAIL_APP_USER_KEY) || '';
-  gmailAppPassword = localStorage.getItem(GMAIL_APP_PASSWORD_KEY) || '';
-}
-
-function getHasGmailAppPassword() {
-  return Boolean(gmailAppUser && gmailAppPassword);
-}
-
-function openGmailAppPasswordModal() {
-  document.querySelector('.modal-overlay')?.remove();
-
-  const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
-  modal.innerHTML = `
-    <div class="modal-card">
-      <div class="modal-header">
-        <div>
-          <h3>Use Your Gmail</h3>
-          <p class="muted-text">Save a Gmail address and 16-character Google App Password on this browser only.</p>
-        </div>
-        <button type="button" class="icon-btn modal-close-btn" aria-label="Close"><i data-lucide="x"></i></button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Gmail Address</label>
-          <input type="email" id="gmailAppUserInput" class="input-field" placeholder="your-email@gmail.com" value="${gmailAppUser}" />
-        </div>
-        <div class="form-group">
-          <label>Google App Password</label>
-          <input type="password" id="gmailAppPasswordInput" class="input-field" placeholder="xxxx xxxx xxxx xxxx" />
-          <div class="saved-draft">Use a 16-character Google App Password, not your normal Gmail password. This is stored only in this browser.</div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        ${getHasGmailAppPassword() ? '<button type="button" id="clearGmailAppPasswordBtn" class="secondary-btn">Clear Saved Gmail</button>' : ''}
-        <button type="button" id="saveGmailAppPasswordBtn" class="primary-btn">Save Gmail Sender</button>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(modal);
-  createIcons({ icons });
-
-  modal.addEventListener('click', (event) => {
-    if (event.target === modal) {
-      modal.remove();
-    }
-  });
-
-  modal.querySelector('.modal-close-btn')?.addEventListener('click', () => modal.remove());
-  modal.querySelector('#saveGmailAppPasswordBtn')?.addEventListener('click', saveGmailAppPassword);
-  modal.querySelector('#clearGmailAppPasswordBtn')?.addEventListener('click', clearGmailAppPassword);
-}
-
-function saveGmailAppPassword() {
-  const userInput = document.getElementById('gmailAppUserInput')?.value.trim();
-  const passwordInput = document.getElementById('gmailAppPasswordInput')?.value.replace(/\s/g, '');
-
-  if (!userInput || !passwordInput) {
-    setInlineStatus(manualStatus, 'Enter both Gmail address and App Password.', 'warning');
-    return;
-  }
-
-  gmailAppUser = userInput;
-  gmailAppPassword = passwordInput;
-  localStorage.setItem(GMAIL_APP_USER_KEY, gmailAppUser);
-  localStorage.setItem(GMAIL_APP_PASSWORD_KEY, gmailAppPassword);
-  document.querySelector('.modal-overlay')?.remove();
-  updateSenderUi();
-  setInlineStatus(outreachStatus, `Gmail App Password saved for ${gmailAppUser}.`, 'success');
-  setInlineStatus(manualStatus, `Gmail App Password saved for ${gmailAppUser}.`, 'success');
-}
-
-function clearGmailAppPassword() {
-  gmailAppUser = '';
-  gmailAppPassword = '';
-  localStorage.removeItem(GMAIL_APP_USER_KEY);
-  localStorage.removeItem(GMAIL_APP_PASSWORD_KEY);
-  document.querySelector('.modal-overlay')?.remove();
-  updateSenderUi();
-  setInlineStatus(outreachStatus, 'Saved Gmail App Password cleared from this browser.', 'info');
-  setInlineStatus(manualStatus, 'Saved Gmail App Password cleared from this browser.', 'info');
-}
-
 function openLocalLoginModal() {
   document.querySelector('.modal-overlay')?.remove();
 
@@ -820,71 +722,27 @@ async function submitLocalLogin() {
 }
 
 function getEffectiveMailCapability() {
-  if (getHasGmailAppPassword()) {
-    return {
-      canSendMail: true,
-      mode: 'gmail-app-password',
-      senderEmail: gmailAppUser,
-      requiresGoogleAuth: false
-    };
-  }
-
   return {
-    canSendMail: Boolean(currentUser?.canSendMail || mailCapability.canSendMail),
-    mode: currentUser?.mailMode || mailCapability.mode,
-    senderEmail: currentUser?.senderEmail || mailCapability.senderEmail || '',
-    requiresGoogleAuth: currentUser?.requiresGoogleAuth ?? mailCapability.requiresGoogleAuth
+    canSendMail: Boolean(mailCapability.canSendMail),
+    mode: mailCapability.mode,
+    senderEmail: mailCapability.senderEmail || '',
+    requiresGoogleAuth: false
   };
 }
 
 function getMailBlockedMessage() {
-  const capability = getEffectiveMailCapability();
-
-  if (capability.requiresGoogleAuth) {
-    return currentUser?.email
-      ? 'Connect Gmail sender or use Gmail App Password before sending mail.'
-      : 'Mail sending needs Gmail App Password, Google connect, or a configured server sender.';
-  }
-
-  return 'Mail sending is not configured on the server yet.';
+  return 'Mail sending is not configured on the server yet. Add RESEND_API_KEY and RESEND_FROM_EMAIL in Vercel environment variables.';
 }
 
 function updateSenderUi() {
   const capability = getEffectiveMailCapability();
-  const hasDirectSender = capability.mode === 'server-smtp' || capability.mode === 'resend-api' || capability.mode === 'gmail-app-password';
-  const senderLabel = hasDirectSender
-    ? `${capability.mode === 'resend-api' ? 'Resend sender' : capability.mode === 'gmail-app-password' ? 'Your Gmail' : 'Server sender'} ${capability.senderEmail || 'configured'}`
-    : currentUser?.email
-      ? `${currentUser.displayName} (${currentUser.email})`
-      : 'Login with name and email to save your tracker. Gmail connect is optional.';
+  const senderKind = capability.mode === 'resend-api' ? 'Resend' : 'Server SMTP';
+  const senderLabel = capability.canSendMail
+    ? `${senderKind} sender ${capability.senderEmail || 'configured'} is ready.`
+    : 'Mail sender is not configured yet.';
 
-  const permissionHint = capability.canSendMail
-    ? hasDirectSender
-      ? capability.mode === 'gmail-app-password'
-        ? 'Your Gmail App Password is ready for sending from this browser.'
-        : 'Direct mail is ready. Gmail connect is not needed.'
-      : 'Mail access is ready.'
-    : currentUser?.email
-      ? 'Connect Gmail sender only if you want to send mail.'
-      : capability.requiresGoogleAuth
-        ? 'Mail sending is disabled until you log in or add Gmail App Password.'
-        : 'Mail sending is disabled until a server sender is configured.';
-
-  const senderActionHref = currentUser?.email ? '/auth/google-gmail' : '#';
-  const senderActionLabel = capability.canSendMail && !hasDirectSender
-    ? 'Reconnect Gmail Sender'
-    : currentUser?.email
-      ? 'Connect Gmail Sender'
-      : 'Login from top-right';
-
-  bulkSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
-  manualSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
-  bulkLoginHint.classList.toggle('hidden', hasDirectSender || !capability.requiresGoogleAuth || !currentUser?.email);
-  manualLoginHint.classList.toggle('hidden', hasDirectSender || !capability.requiresGoogleAuth || !currentUser?.email);
-  bulkLoginHint.textContent = senderActionLabel;
-  bulkLoginHint.href = senderActionHref;
-  manualLoginHint.textContent = senderActionLabel;
-  manualLoginHint.href = senderActionHref;
+  bulkSenderStatus.textContent = senderLabel;
+  manualSenderStatus.textContent = senderLabel;
   fireAllMailsBtn.disabled = false;
   sendManualBtn.disabled = false;
   fireAllMailsBtn.title = capability.canSendMail ? 'Send bulk outreach emails' : getMailBlockedMessage();
@@ -987,22 +845,6 @@ function setInlineStatus(element, message, tone = 'info') {
   element.textContent = message;
   element.className = `inline-status ${tone}`;
   element.classList.remove('hidden');
-}
-
-function isGmailAuthFailure(message) {
-  const normalized = (message || '').toLowerCase();
-  return normalized.includes('gmail login failed')
-    || normalized.includes('badcredentials')
-    || normalized.includes('invalid login')
-    || normalized.includes('535-5.7.8');
-}
-
-function promptGmailAppPasswordReset(targetElement) {
-  gmailAppPassword = '';
-  localStorage.removeItem(GMAIL_APP_PASSWORD_KEY);
-  updateSenderUi();
-  setInlineStatus(targetElement, 'Gmail authentication failed. Re-enter your Gmail App Password (16 characters) and try again.', 'warning');
-  openGmailAppPasswordModal();
 }
 
 function handleFileUpload() {
@@ -1632,7 +1474,6 @@ function renderBulkPreview() {
 async function sendBulkOutreach() {
   const resume = savedResumeFiles[0] || resumeUpload.files[0];
   const capability = getEffectiveMailCapability();
-  const useGmailAppPassword = capability.mode === 'gmail-app-password' && getHasGmailAppPassword();
 
   if (!outreachContacts.length) {
     setInlineStatus(outreachStatus, 'Load recruiter HTML first so there are contacts to send to.', 'warning');
@@ -1666,10 +1507,6 @@ async function sendBulkOutreach() {
   const payload = new FormData();
   payload.append('contacts', JSON.stringify(contacts));
   payload.append('resume', resume, resume.name);
-  if (useGmailAppPassword) {
-    payload.append('gmailUser', gmailAppUser);
-    payload.append('gmailAppPassword', gmailAppPassword);
-  }
 
   const button = document.getElementById('fireAllMailsBtn');
   button.disabled = true;
@@ -1687,15 +1524,9 @@ async function sendBulkOutreach() {
 
     const successCount = data.results.filter((item) => item.status === 'Sent').length;
     const failureCount = data.results.length - successCount;
-    const senderLabel = useGmailAppPassword ? gmailAppUser : data.senderEmail;
-    setInlineStatus(outreachStatus, `Bulk outreach finished from ${senderLabel}. Sent: ${successCount}, failed: ${failureCount}.`, failureCount ? 'warning' : 'success');
+    setInlineStatus(outreachStatus, `Bulk outreach finished from ${data.senderEmail}. Sent: ${successCount}, failed: ${failureCount}.`, failureCount ? 'warning' : 'success');
   } catch (error) {
-    const message = error.message || 'Bulk outreach failed.';
-    if (isGmailAuthFailure(message) && useGmailAppPassword) {
-      promptGmailAppPasswordReset(outreachStatus);
-      return;
-    }
-    setInlineStatus(outreachStatus, message, 'error');
+    setInlineStatus(outreachStatus, error.message || 'Bulk outreach failed.', 'error');
   } finally {
     button.disabled = false;
     button.innerHTML = '<i data-lucide="zap"></i> Send Bulk Outreach';
@@ -1709,7 +1540,6 @@ async function sendManualEmail() {
   const body = personalizeTemplate(manualBodyInput.value.trim(), to);
   const files = savedManualAttachments.length ? savedManualAttachments : Array.from(manualAttachmentsInput.files || []);
   const capability = getEffectiveMailCapability();
-  const useGmailAppPassword = capability.mode === 'gmail-app-password' && getHasGmailAppPassword();
 
   if (!to || !subject || !body) {
     setInlineStatus(manualStatus, 'Fill receiver email, subject, and body before sending.', 'warning');
@@ -1717,10 +1547,7 @@ async function sendManualEmail() {
   }
 
   if (!capability.canSendMail) {
-    const opened = openManualInGmailWeb({ successMessage: 'Sender is not configured in app. Opened Gmail draft instead.' });
-    if (!opened) {
-      setInlineStatus(manualStatus, getMailBlockedMessage(), 'warning');
-    }
+    setInlineStatus(manualStatus, getMailBlockedMessage(), 'warning');
     return;
   }
 
@@ -1729,10 +1556,6 @@ async function sendManualEmail() {
   payload.append('subject', subject);
   payload.append('body', body);
   files.forEach((file) => payload.append('attachments', file, file.name));
-  if (useGmailAppPassword) {
-    payload.append('gmailUser', gmailAppUser);
-    payload.append('gmailAppPassword', gmailAppPassword);
-  }
 
   const button = document.getElementById('sendManualBtn');
   button.disabled = true;
@@ -1745,48 +1568,14 @@ async function sendManualEmail() {
     });
     const data = await safeJson(response);
     if (!data.success) throw new Error(data.error || 'Manual send failed.');
-    const senderLabel = useGmailAppPassword ? gmailAppUser : data.senderEmail;
-    setInlineStatus(manualStatus, `Email sent successfully from ${senderLabel} to ${to}.`, 'success');
+    setInlineStatus(manualStatus, `Email sent successfully from ${data.senderEmail} to ${to}.`, 'success');
   } catch (error) {
-    const message = error.message || 'Manual email failed.';
-    if (isGmailAuthFailure(message)) {
-      const opened = openManualInGmailWeb({ successMessage: 'App Gmail login failed. Opened Gmail draft instead.' });
-      if (!opened && useGmailAppPassword) {
-        promptGmailAppPasswordReset(manualStatus);
-      } else if (!opened) {
-        setInlineStatus(manualStatus, message, 'error');
-      }
-      return;
-    }
-    setInlineStatus(manualStatus, message, 'error');
+    setInlineStatus(manualStatus, error.message || 'Manual email failed.', 'error');
   } finally {
     button.disabled = false;
     button.innerHTML = '<i data-lucide="send"></i> Send Email';
     createIcons({ icons });
   }
-}
-
-function openManualInGmailWeb(options = {}) {
-  const { successMessage } = options;
-  const to = manualToEmailInput.value.trim();
-  const subject = personalizeTemplate(manualSubjectInput.value.trim(), to);
-  const body = personalizeTemplate(manualBodyInput.value.trim(), to);
-
-  if (!to || !subject || !body) {
-    setInlineStatus(manualStatus, 'Fill receiver email, subject, and body before opening Gmail draft.', 'warning');
-    return false;
-  }
-
-  const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  const opened = window.open(gmailComposeUrl, '_blank', 'noopener,noreferrer');
-
-  if (!opened) {
-    setInlineStatus(manualStatus, 'Popup blocked. Allow popups for this site, then try "Open in Gmail (Easy)" again.', 'warning');
-    return false;
-  }
-
-  setInlineStatus(manualStatus, successMessage || 'Opened Gmail draft in a new tab. Attach files there and click Send.', 'success');
-  return true;
 }
 
 async function scrapeEmailsFromUrl() {
