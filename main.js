@@ -209,7 +209,7 @@ function bindEvents() {
   downloadAtsDocxBtn?.addEventListener('click', downloadAtsDocx);
   atsResumeFileInput?.addEventListener('change', handleAtsResumeUpload);
   headerLoginBtn.addEventListener('click', () => {
-    window.location.href = '/auth/google';
+    openLocalLoginModal();
   });
 
   [bulkSubjectInput, bulkBodyInput, manualToEmailInput, manualSubjectInput, manualBodyInput, scrapeUrlInput].forEach((element) => {
@@ -741,6 +741,82 @@ function clearGmailAppPassword() {
   setInlineStatus(manualStatus, 'Saved Gmail App Password cleared from this browser.', 'info');
 }
 
+function openLocalLoginModal() {
+  document.querySelector('.modal-overlay')?.remove();
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <h3>Login</h3>
+          <p class="muted-text">Use your name and email to save tracker data and personalize outreach.</p>
+        </div>
+        <button type="button" class="icon-btn modal-close-btn" aria-label="Close"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="localLoginNameInput" class="input-field" placeholder="Your name" value="${currentUser?.displayName || ''}" />
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="localLoginEmailInput" class="input-field" placeholder="you@example.com" value="${currentUser?.email || ''}" />
+        </div>
+        <div class="saved-draft">This login does not require Google OAuth.</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="submitLocalLoginBtn" class="primary-btn">Continue</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  createIcons({ icons });
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) modal.remove();
+  });
+
+  modal.querySelector('.modal-close-btn')?.addEventListener('click', () => modal.remove());
+  modal.querySelector('#submitLocalLoginBtn')?.addEventListener('click', submitLocalLogin);
+  modal.querySelector('#localLoginEmailInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') submitLocalLogin();
+  });
+}
+
+async function submitLocalLogin() {
+  const name = document.getElementById('localLoginNameInput')?.value.trim();
+  const email = document.getElementById('localLoginEmailInput')?.value.trim().toLowerCase();
+
+  if (!name || !email) {
+    showBanner('Enter both name and email to continue.', 'warning');
+    return;
+  }
+
+  try {
+    const response = await apiFetch('/auth/local-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email })
+    });
+    const data = await safeJson(response);
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || 'Login failed.');
+    }
+
+    currentUser = data.user || { displayName: name, email };
+    document.getElementById('userName').innerText = currentUser.displayName || name;
+    document.querySelector('.modal-overlay')?.remove();
+    updateSenderUi();
+    await loadAppliedRecords();
+    showBanner(`Logged in as ${currentUser.displayName || name}.`, 'success');
+  } catch (error) {
+    showBanner(error.message || 'Login failed. Try again.', 'danger');
+  }
+}
+
 function getEffectiveMailCapability() {
   if (getHasGmailAppPassword()) {
     return {
@@ -778,7 +854,7 @@ function updateSenderUi() {
     ? `${capability.mode === 'resend-api' ? 'Resend sender' : capability.mode === 'gmail-app-password' ? 'Your Gmail' : 'Server sender'} ${capability.senderEmail || 'configured'}`
     : currentUser?.email
       ? `${currentUser.displayName} (${currentUser.email})`
-      : 'Login with Google to save your tracker. Gmail connect is optional.';
+      : 'Login with name and email to save your tracker. Gmail connect is optional.';
 
   const permissionHint = capability.canSendMail
     ? hasDirectSender
@@ -789,20 +865,20 @@ function updateSenderUi() {
     : currentUser?.email
       ? 'Connect Gmail sender only if you want to send mail.'
       : capability.requiresGoogleAuth
-        ? 'Mail sending is disabled until you log in or connect Gmail.'
+        ? 'Mail sending is disabled until you log in or add Gmail App Password.'
         : 'Mail sending is disabled until a server sender is configured.';
 
-  const senderActionHref = currentUser?.email ? '/auth/google-gmail' : '/auth/google';
+  const senderActionHref = currentUser?.email ? '/auth/google-gmail' : '#';
   const senderActionLabel = capability.canSendMail && !hasDirectSender
     ? 'Reconnect Gmail Sender'
     : currentUser?.email
       ? 'Connect Gmail Sender'
-      : 'Login with Google';
+      : 'Login from top-right';
 
   bulkSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
   manualSenderStatus.textContent = `${senderLabel} ${permissionHint}`;
-  bulkLoginHint.classList.toggle('hidden', hasDirectSender || !capability.requiresGoogleAuth);
-  manualLoginHint.classList.toggle('hidden', hasDirectSender || !capability.requiresGoogleAuth);
+  bulkLoginHint.classList.toggle('hidden', hasDirectSender || !capability.requiresGoogleAuth || !currentUser?.email);
+  manualLoginHint.classList.toggle('hidden', hasDirectSender || !capability.requiresGoogleAuth || !currentUser?.email);
   bulkLoginHint.textContent = senderActionLabel;
   bulkLoginHint.href = senderActionHref;
   manualLoginHint.textContent = senderActionLabel;
