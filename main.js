@@ -807,8 +807,12 @@ function updateSenderUi() {
   bulkLoginHint.href = senderActionHref;
   manualLoginHint.textContent = senderActionLabel;
   manualLoginHint.href = senderActionHref;
-  fireAllMailsBtn.disabled = !capability.canSendMail;
-  sendManualBtn.disabled = !capability.canSendMail;
+  fireAllMailsBtn.disabled = false;
+  sendManualBtn.disabled = false;
+  fireAllMailsBtn.title = capability.canSendMail ? 'Send bulk outreach emails' : getMailBlockedMessage();
+  sendManualBtn.title = capability.canSendMail ? 'Send manual email' : getMailBlockedMessage();
+  fireAllMailsBtn.setAttribute('aria-disabled', capability.canSendMail ? 'false' : 'true');
+  sendManualBtn.setAttribute('aria-disabled', capability.canSendMail ? 'false' : 'true');
 
   document.getElementById('userProfile').classList.toggle('hidden', !currentUser?.email);
   headerLoginBtn.classList.toggle('hidden', Boolean(currentUser?.email));
