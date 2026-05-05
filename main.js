@@ -1711,13 +1711,16 @@ async function sendManualEmail() {
   const capability = getEffectiveMailCapability();
   const useGmailAppPassword = capability.mode === 'gmail-app-password' && getHasGmailAppPassword();
 
-  if (!capability.canSendMail) {
-    setInlineStatus(manualStatus, getMailBlockedMessage(), 'warning');
+  if (!to || !subject || !body) {
+    setInlineStatus(manualStatus, 'Fill receiver email, subject, and body before sending.', 'warning');
     return;
   }
 
-  if (!to || !subject || !body) {
-    setInlineStatus(manualStatus, 'Fill receiver email, subject, and body before sending.', 'warning');
+  if (!capability.canSendMail) {
+    const opened = openManualInGmailWeb({ successMessage: 'Sender is not configured in app. Opened Gmail draft instead.' });
+    if (!opened) {
+      setInlineStatus(manualStatus, getMailBlockedMessage(), 'warning');
+    }
     return;
   }
 
@@ -1746,8 +1749,13 @@ async function sendManualEmail() {
     setInlineStatus(manualStatus, `Email sent successfully from ${senderLabel} to ${to}.`, 'success');
   } catch (error) {
     const message = error.message || 'Manual email failed.';
-    if (isGmailAuthFailure(message) && useGmailAppPassword) {
-      promptGmailAppPasswordReset(manualStatus);
+    if (isGmailAuthFailure(message)) {
+      const opened = openManualInGmailWeb({ successMessage: 'App Gmail login failed. Opened Gmail draft instead.' });
+      if (!opened && useGmailAppPassword) {
+        promptGmailAppPasswordReset(manualStatus);
+      } else if (!opened) {
+        setInlineStatus(manualStatus, message, 'error');
+      }
       return;
     }
     setInlineStatus(manualStatus, message, 'error');
@@ -1758,14 +1766,15 @@ async function sendManualEmail() {
   }
 }
 
-function openManualInGmailWeb() {
+function openManualInGmailWeb(options = {}) {
+  const { successMessage } = options;
   const to = manualToEmailInput.value.trim();
   const subject = personalizeTemplate(manualSubjectInput.value.trim(), to);
   const body = personalizeTemplate(manualBodyInput.value.trim(), to);
 
   if (!to || !subject || !body) {
     setInlineStatus(manualStatus, 'Fill receiver email, subject, and body before opening Gmail draft.', 'warning');
-    return;
+    return false;
   }
 
   const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -1773,10 +1782,11 @@ function openManualInGmailWeb() {
 
   if (!opened) {
     setInlineStatus(manualStatus, 'Popup blocked. Allow popups for this site, then try "Open in Gmail (Easy)" again.', 'warning');
-    return;
+    return false;
   }
 
-  setInlineStatus(manualStatus, 'Opened Gmail draft in a new tab. Attach files there and click Send.', 'success');
+  setInlineStatus(manualStatus, successMessage || 'Opened Gmail draft in a new tab. Attach files there and click Send.', 'success');
+  return true;
 }
 
 async function scrapeEmailsFromUrl() {
