@@ -987,6 +987,22 @@ function setInlineStatus(element, message, tone = 'info') {
   element.classList.remove('hidden');
 }
 
+function isGmailAuthFailure(message) {
+  const normalized = (message || '').toLowerCase();
+  return normalized.includes('gmail login failed')
+    || normalized.includes('badcredentials')
+    || normalized.includes('invalid login')
+    || normalized.includes('535-5.7.8');
+}
+
+function promptGmailAppPasswordReset(targetElement) {
+  gmailAppPassword = '';
+  localStorage.removeItem(GMAIL_APP_PASSWORD_KEY);
+  updateSenderUi();
+  setInlineStatus(targetElement, 'Gmail authentication failed. Re-enter your Gmail App Password (16 characters) and try again.', 'warning');
+  openGmailAppPasswordModal();
+}
+
 function handleFileUpload() {
   const file = fileInput.files[0];
   if (!file) return;
@@ -1672,7 +1688,12 @@ async function sendBulkOutreach() {
     const senderLabel = useGmailAppPassword ? gmailAppUser : data.senderEmail;
     setInlineStatus(outreachStatus, `Bulk outreach finished from ${senderLabel}. Sent: ${successCount}, failed: ${failureCount}.`, failureCount ? 'warning' : 'success');
   } catch (error) {
-    setInlineStatus(outreachStatus, error.message || 'Bulk outreach failed.', 'error');
+    const message = error.message || 'Bulk outreach failed.';
+    if (isGmailAuthFailure(message) && useGmailAppPassword) {
+      promptGmailAppPasswordReset(outreachStatus);
+      return;
+    }
+    setInlineStatus(outreachStatus, message, 'error');
   } finally {
     button.disabled = false;
     button.innerHTML = '<i data-lucide="zap"></i> Send Bulk Outreach';
@@ -1722,7 +1743,12 @@ async function sendManualEmail() {
     const senderLabel = useGmailAppPassword ? gmailAppUser : data.senderEmail;
     setInlineStatus(manualStatus, `Email sent successfully from ${senderLabel} to ${to}.`, 'success');
   } catch (error) {
-    setInlineStatus(manualStatus, error.message || 'Manual email failed.', 'error');
+    const message = error.message || 'Manual email failed.';
+    if (isGmailAuthFailure(message) && useGmailAppPassword) {
+      promptGmailAppPasswordReset(manualStatus);
+      return;
+    }
+    setInlineStatus(manualStatus, message, 'error');
   } finally {
     button.disabled = false;
     button.innerHTML = '<i data-lucide="send"></i> Send Email';
