@@ -92,6 +92,7 @@ const savedAttachmentInfo = document.getElementById('savedAttachmentInfo');
 const savedResumeInfo = document.getElementById('savedResumeInfo');
 const fireAllMailsBtn = document.getElementById('fireAllMailsBtn');
 const sendManualBtn = document.getElementById('sendManualBtn');
+const manualGmailWebBtn = document.getElementById('manualGmailWebBtn');
 const headerLoginBtn = document.getElementById('loginBtn');
 const atsResumeInput = document.getElementById('atsResumeInput');
 const atsResumeFileInput = document.getElementById('atsResumeFileInput');
@@ -200,6 +201,7 @@ function bindEvents() {
   outreachFileInput.addEventListener('change', handleOutreachUpload);
   document.getElementById('fireAllMailsBtn').addEventListener('click', sendBulkOutreach);
   document.getElementById('sendManualBtn').addEventListener('click', sendManualEmail);
+  manualGmailWebBtn?.addEventListener('click', openManualInGmailWeb);
   document.getElementById('scrapeBtn').addEventListener('click', scrapeEmailsFromUrl);
   document.getElementById('scanWalkinsBtn').addEventListener('click', scanWalkins);
   bulkAppPasswordBtn?.addEventListener('click', openGmailAppPasswordModal);
@@ -1754,6 +1756,27 @@ async function sendManualEmail() {
     button.innerHTML = '<i data-lucide="send"></i> Send Email';
     createIcons({ icons });
   }
+}
+
+function openManualInGmailWeb() {
+  const to = manualToEmailInput.value.trim();
+  const subject = personalizeTemplate(manualSubjectInput.value.trim(), to);
+  const body = personalizeTemplate(manualBodyInput.value.trim(), to);
+
+  if (!to || !subject || !body) {
+    setInlineStatus(manualStatus, 'Fill receiver email, subject, and body before opening Gmail draft.', 'warning');
+    return;
+  }
+
+  const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const opened = window.open(gmailComposeUrl, '_blank', 'noopener,noreferrer');
+
+  if (!opened) {
+    setInlineStatus(manualStatus, 'Popup blocked. Allow popups for this site, then try "Open in Gmail (Easy)" again.', 'warning');
+    return;
+  }
+
+  setInlineStatus(manualStatus, 'Opened Gmail draft in a new tab. Attach files there and click Send.', 'success');
 }
 
 async function scrapeEmailsFromUrl() {
