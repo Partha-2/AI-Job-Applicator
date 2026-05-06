@@ -745,10 +745,10 @@ function updateSenderUi() {
   manualSenderStatus.textContent = senderLabel;
   fireAllMailsBtn.disabled = false;
   sendManualBtn.disabled = false;
-  fireAllMailsBtn.title = capability.canSendMail ? 'Send bulk outreach emails' : getMailBlockedMessage();
-  sendManualBtn.title = capability.canSendMail ? 'Send manual email' : getMailBlockedMessage();
-  fireAllMailsBtn.setAttribute('aria-disabled', capability.canSendMail ? 'false' : 'true');
-  sendManualBtn.setAttribute('aria-disabled', capability.canSendMail ? 'false' : 'true');
+  fireAllMailsBtn.title = 'Send bulk outreach emails';
+  sendManualBtn.title = 'Send manual email';
+  fireAllMailsBtn.setAttribute('aria-disabled', 'false');
+  sendManualBtn.setAttribute('aria-disabled', 'false');
 
   document.getElementById('userProfile').classList.toggle('hidden', !currentUser?.email);
   headerLoginBtn.classList.toggle('hidden', Boolean(currentUser?.email));
@@ -1480,8 +1480,11 @@ async function sendBulkOutreach() {
     return;
   }
 
-  if (!capability.canSendMail) {
-    setInlineStatus(outreachStatus, getMailBlockedMessage(), 'warning');
+  const gmailUser = document.getElementById('bulkGmailUser')?.value?.trim();
+  const gmailAppPassword = document.getElementById('bulkGmailAppPassword')?.value?.trim();
+
+  if (!capability.canSendMail && (!gmailUser || !gmailAppPassword)) {
+    setInlineStatus(outreachStatus, 'Enter your Gmail User and App Password, or configure the server to send emails.', 'warning');
     return;
   }
 
@@ -1507,6 +1510,10 @@ async function sendBulkOutreach() {
   const payload = new FormData();
   payload.append('contacts', JSON.stringify(contacts));
   payload.append('resume', resume, resume.name);
+  if (gmailUser && gmailAppPassword) {
+    payload.append('gmailUser', gmailUser);
+    payload.append('gmailAppPassword', gmailAppPassword);
+  }
 
   const button = document.getElementById('fireAllMailsBtn');
   button.disabled = true;
@@ -1546,8 +1553,11 @@ async function sendManualEmail() {
     return;
   }
 
-  if (!capability.canSendMail) {
-    setInlineStatus(manualStatus, getMailBlockedMessage(), 'warning');
+  const gmailUser = document.getElementById('manualGmailUser')?.value?.trim();
+  const gmailAppPassword = document.getElementById('manualGmailAppPassword')?.value?.trim();
+
+  if (!capability.canSendMail && (!gmailUser || !gmailAppPassword)) {
+    setInlineStatus(manualStatus, 'Enter your Gmail User and App Password, or configure the server to send emails.', 'warning');
     return;
   }
 
@@ -1556,6 +1566,10 @@ async function sendManualEmail() {
   payload.append('subject', subject);
   payload.append('body', body);
   files.forEach((file) => payload.append('attachments', file, file.name));
+  if (gmailUser && gmailAppPassword) {
+    payload.append('gmailUser', gmailUser);
+    payload.append('gmailAppPassword', gmailAppPassword);
+  }
 
   const button = document.getElementById('sendManualBtn');
   button.disabled = true;

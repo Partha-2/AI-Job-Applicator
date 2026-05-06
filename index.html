@@ -184,9 +184,14 @@
 
                 <div id="automationConfig" class="automation-form">
                   <div class="sender-panel">
-                    <div>
+                    <div class="w-full">
                       <label>Sender Account</label>
-                      <div id="bulkSenderStatus" class="saved-draft">Server sender is used automatically. No extra setup required for users.</div>
+                      <div id="bulkSenderStatus" class="saved-draft">Enter your Gmail below to send from your own account, or leave blank if the server sender is configured.</div>
+                      <div class="sender-fields">
+                        <input type="email" id="bulkGmailUser" class="input-field" placeholder="your@gmail.com" autocomplete="email" />
+                        <input type="password" id="bulkGmailAppPassword" class="input-field" placeholder="Gmail App Password (16 chars)" autocomplete="current-password" />
+                        <div class="saved-draft">Generate an App Password at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a> — requires 2FA enabled.</div>
+                      </div>
                     </div>
                   </div>
                   <div class="form-group">
@@ -246,10 +251,15 @@
 
                 <div class="manual-form">
                   <div class="form-group">
-                    <label>Sender Account</label>
+                    <label>Sender Account (Gmail)</label>
                     <div class="sender-panel">
                       <div class="w-full">
-                        <div id="manualSenderStatus" class="saved-draft">Server sender is used automatically. No extra setup required for users.</div>
+                        <div id="manualSenderStatus" class="saved-draft">Enter your Gmail below to send from your own account.</div>
+                        <div class="sender-fields">
+                          <input type="email" id="manualGmailUser" class="input-field" placeholder="your@gmail.com" autocomplete="email" />
+                          <input type="password" id="manualGmailAppPassword" class="input-field" placeholder="Gmail App Password (16 chars)" autocomplete="current-password" />
+                          <div class="saved-draft">Generate an App Password at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a> — requires 2FA enabled.</div>
+                        </div>
                       </div>
                     </div>
                   </div>
