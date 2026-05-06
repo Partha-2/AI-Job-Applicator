@@ -139,13 +139,22 @@ function resolveReplyTo(req) {
 }
 
 function getResendConfig() {
-  const apiKey = process.env.RESEND_API_KEY || process.env.RESEND_KEY || '';
+  const apiKey = (
+    process.env.RESEND_API_KEY
+    || process.env.RESEND_KEY
+    || process.env.NEXT_PUBLIC_RESEND_API_KEY
+    || ''
+  ).trim();
   if (!apiKey) return null;
 
-  const from = process.env.RESEND_FROM_EMAIL
+  const from = (
+    process.env.RESEND_FROM_EMAIL
     || process.env.RESEND_FROM
     || process.env.RESEND_SENDER
-    || 'AI Job Applicator <onboarding@resend.dev>';
+    || process.env.NEXT_PUBLIC_RESEND_FROM_EMAIL
+    || process.env.NEXT_PUBLIC_RESEND_FROM
+    || 'AI Job Applicator <onboarding@resend.dev>'
+  ).trim();
 
   return {
     apiKey,
